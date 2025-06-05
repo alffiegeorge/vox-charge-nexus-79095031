@@ -20,6 +20,16 @@ import Settings from "./pages/Settings";
 import CustomerCallHistory from "./pages/CustomerCallHistory";
 import CustomerBilling from "./pages/CustomerBilling";
 import CustomerSettings from "./pages/CustomerSettings";
+import RouteManagement from "./pages/RouteManagement";
+import QualityMonitoring from "./pages/QualityMonitoring";
+import InvoiceManagement from "./pages/InvoiceManagement";
+import CDRManagement from "./pages/CDRManagement";
+import SMSManagement from "./pages/SMSManagement";
+import NumberPorting from "./pages/NumberPorting";
+import SupportTickets from "./pages/SupportTickets";
+import AuditLogs from "./pages/AuditLogs";
+import CustomerInvoices from "./pages/CustomerInvoices";
+import CustomerSMS from "./pages/CustomerSMS";
 
 const queryClient = new QueryClient();
 
@@ -37,15 +47,25 @@ const App = () => (
           <Route path="/admin/customers" element={<AdminLayout><Customers /></AdminLayout>} />
           <Route path="/admin/dids" element={<AdminLayout><DIDs /></AdminLayout>} />
           <Route path="/admin/trunks" element={<AdminLayout><Trunks /></AdminLayout>} />
+          <Route path="/admin/routes" element={<AdminLayout><RouteManagement /></AdminLayout>} />
           <Route path="/admin/billing" element={<AdminLayout><Billing /></AdminLayout>} />
+          <Route path="/admin/invoices" element={<AdminLayout><InvoiceManagement /></AdminLayout>} />
           <Route path="/admin/rates" element={<AdminLayout><Rates /></AdminLayout>} />
+          <Route path="/admin/cdr" element={<AdminLayout><CDRManagement /></AdminLayout>} />
+          <Route path="/admin/quality" element={<AdminLayout><QualityMonitoring /></AdminLayout>} />
+          <Route path="/admin/sms" element={<AdminLayout><SMSManagement /></AdminLayout>} />
+          <Route path="/admin/porting" element={<AdminLayout><NumberPorting /></AdminLayout>} />
           <Route path="/admin/reports" element={<AdminLayout><Reports /></AdminLayout>} />
+          <Route path="/admin/tickets" element={<AdminLayout><SupportTickets /></AdminLayout>} />
+          <Route path="/admin/audit" element={<AdminLayout><AuditLogs /></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><Settings /></AdminLayout>} />
           
           {/* Customer Routes */}
           <Route path="/customer" element={<CustomerLayout><CustomerDashboard /></CustomerLayout>} />
           <Route path="/customer/calls" element={<CustomerLayout><CustomerCallHistory /></CustomerLayout>} />
           <Route path="/customer/billing" element={<CustomerLayout><CustomerBilling /></CustomerLayout>} />
+          <Route path="/customer/invoices" element={<CustomerLayout><CustomerInvoices /></CustomerLayout>} />
+          <Route path="/customer/sms" element={<CustomerLayout><CustomerSMS /></CustomerLayout>} />
           <Route path="/customer/settings" element={<CustomerLayout><CustomerSettings /></CustomerLayout>} />
           
           {/* Catch-all route */}

@@ -49,7 +49,7 @@ const Index = () => {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Phone className="h-12 w-12 text-blue-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">VoiceFlow Billing</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">iBilling</h1>
           <p className="text-gray-600">Professional Voice Billing System</p>
         </div>
         
