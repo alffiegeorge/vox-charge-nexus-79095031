@@ -1,0 +1,157 @@
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const DUMMY_BILLING_HISTORY = [
+  { date: "2024-01-01", description: "Credit Refill", amount: "+$50.00", balance: "$125.50", type: "Credit" },
+  { date: "2024-01-02", description: "Call Charges", amount: "-$2.45", balance: "$123.05", type: "Debit" },
+  { date: "2024-01-03", description: "DID Monthly Fee", amount: "-$5.00", balance: "$118.05", type: "Debit" },
+  { date: "2024-01-04", description: "Call Charges", amount: "-$1.23", balance: "$116.82", type: "Debit" },
+  { date: "2024-01-05", description: "Call Charges", amount: "-$3.67", balance: "$113.15", type: "Debit" }
+];
+
+const CustomerBilling = () => {
+  return (
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Billing & Payments</h1>
+        <p className="text-gray-600">Manage your account balance and view billing history</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Balance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">$125.50</div>
+            <p className="text-sm text-gray-600 mt-2">Prepaid Account</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>This Month Usage</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">$12.25</div>
+            <p className="text-sm text-gray-600 mt-2">245 minutes used</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Next Bill Date</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">Jan 31</div>
+            <p className="text-sm text-gray-600 mt-2">DID monthly fees</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Add Credit</CardTitle>
+            <CardDescription>Top up your account balance</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input placeholder="Enter amount" type="number" />
+            </div>
+            <div className="space-y-2">
+              <Label>Payment Method</Label>
+              <select className="w-full border rounded-md p-2">
+                <option>Credit Card</option>
+                <option>PayPal</option>
+                <option>Bank Transfer</option>
+              </select>
+            </div>
+            <Button className="w-full bg-green-600 hover:bg-green-700">Add Credit</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Account Information</CardTitle>
+            <CardDescription>Your billing details</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Account Type:</span>
+              <span className="font-medium">Prepaid</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Customer ID:</span>
+              <span className="font-medium">C001</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Low Balance Alert:</span>
+              <span className="font-medium">$10.00</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Auto-refill:</span>
+              <span className="text-red-600">Disabled</span>
+            </div>
+            <Button variant="outline" className="w-full">Update Settings</Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Billing History</CardTitle>
+          <CardDescription>Recent account transactions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <Input placeholder="Search transactions..." className="max-w-sm" />
+              <Button variant="outline">Export</Button>
+            </div>
+            <div className="border rounded-lg">
+              <table className="w-full">
+                <thead className="border-b bg-gray-50">
+                  <tr>
+                    <th className="text-left p-4">Date</th>
+                    <th className="text-left p-4">Description</th>
+                    <th className="text-left p-4">Amount</th>
+                    <th className="text-left p-4">Balance</th>
+                    <th className="text-left p-4">Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DUMMY_BILLING_HISTORY.map((transaction, index) => (
+                    <tr key={index} className="border-b">
+                      <td className="p-4">{transaction.date}</td>
+                      <td className="p-4">{transaction.description}</td>
+                      <td className={`p-4 font-semibold ${
+                        transaction.type === "Credit" ? "text-green-600" : "text-red-600"
+                      }`}>
+                        {transaction.amount}
+                      </td>
+                      <td className="p-4">{transaction.balance}</td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          transaction.type === "Credit" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                        }`}>
+                          {transaction.type}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default CustomerBilling;
