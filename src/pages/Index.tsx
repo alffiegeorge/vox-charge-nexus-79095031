@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +7,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Phone, Users, CreditCard, Settings, BarChart3, Building2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+// Dummy login credentials
+const DUMMY_CREDENTIALS = {
+  admin: { username: "admin", password: "admin123" },
+  customer: { username: "customer", password: "customer123" }
+};
+
+// Dummy data
+const DUMMY_CUSTOMERS = [
+  { id: "C001", name: "John Doe", email: "john@example.com", type: "Prepaid", balance: "$125.50", status: "Active", phone: "+1-555-0123" },
+  { id: "C002", name: "Jane Smith", email: "jane@example.com", type: "Postpaid", balance: "$-45.20", status: "Active", phone: "+1-555-0456" },
+  { id: "C003", name: "Bob Johnson", email: "bob@example.com", type: "Prepaid", balance: "$0.00", status: "Suspended", phone: "+1-555-0789" },
+  { id: "C004", name: "Alice Wilson", email: "alice@example.com", type: "Prepaid", balance: "$89.75", status: "Active", phone: "+1-555-0321" },
+  { id: "C005", name: "Mike Davis", email: "mike@example.com", type: "Postpaid", balance: "$-12.80", status: "Active", phone: "+1-555-0654" }
+];
+
+const DUMMY_DIDS = [
+  { number: "+1-555-0123", customer: "John Doe", country: "USA", rate: "$5.00", status: "Active", type: "Local" },
+  { number: "+44-20-7946-0958", customer: "Jane Smith", country: "UK", rate: "$8.00", status: "Active", type: "International" },
+  { number: "+1-555-0456", customer: "Unassigned", country: "USA", rate: "$5.00", status: "Available", type: "Local" },
+  { number: "+1-800-555-0789", customer: "Bob Johnson", country: "USA", rate: "$12.00", status: "Active", type: "Toll-Free" },
+  { number: "+49-30-12345678", customer: "Alice Wilson", country: "Germany", rate: "$10.00", status: "Active", type: "International" }
+];
+
+const DUMMY_RATES = [
+  { destination: "USA Local", prefix: "1", rate: "$0.02", connection: "$0.01", description: "US Local calls" },
+  { destination: "UK Mobile", prefix: "447", rate: "$0.15", connection: "$0.05", description: "UK Mobile numbers" },
+  { destination: "Canada", prefix: "1", rate: "$0.03", connection: "$0.01", description: "Canada calls" },
+  { destination: "Germany", prefix: "49", rate: "$0.08", connection: "$0.03", description: "Germany calls" },
+  { destination: "Australia Mobile", prefix: "614", rate: "$0.25", connection: "$0.08", description: "Australia Mobile" }
+];
+
+const DUMMY_PLANS = [
+  { name: "Basic Plan", price: "$10/month", minutes: "500 mins", features: ["Local calls", "Basic support"] },
+  { name: "Standard Plan", price: "$25/month", minutes: "1500 mins", features: ["Local + International", "Email support", "Call forwarding"] },
+  { name: "Premium Plan", price: "$50/month", minutes: "Unlimited", features: ["All destinations", "24/7 support", "Advanced features", "Priority routing"] }
+];
+
+const DUMMY_RECENT_CALLS = [
+  { number: "+1-555-0123", duration: "5:23", cost: "$0.11", time: "2 hours ago", destination: "New York" },
+  { number: "+44-20-7946", duration: "12:45", cost: "$1.91", time: "5 hours ago", destination: "London" },
+  { number: "+1-555-0456", duration: "3:12", cost: "$0.06", time: "1 day ago", destination: "California" },
+  { number: "+49-30-123456", duration: "8:34", cost: "$0.68", time: "2 days ago", destination: "Berlin" },
+  { number: "+1-800-555-0789", duration: "15:22", cost: "$0.00", time: "3 days ago", destination: "Toll-Free" }
+];
+
 const Index = () => {
   const [loginData, setLoginData] = useState({ username: "", password: "" });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -15,10 +59,12 @@ const Index = () => {
   const { toast } = useToast();
 
   const handleLogin = (type: "admin" | "customer") => {
-    if (!loginData.username || !loginData.password) {
+    const credentials = DUMMY_CREDENTIALS[type];
+    
+    if (loginData.username !== credentials.username || loginData.password !== credentials.password) {
       toast({
-        title: "Error",
-        description: "Please enter username and password",
+        title: "Login Failed",
+        description: `Invalid credentials. Use ${credentials.username}/${credentials.password}`,
         variant: "destructive"
       });
       return;
@@ -67,6 +113,16 @@ const Index = () => {
                   onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                 />
               </div>
+              
+              {/* Dummy credentials display */}
+              <div className="bg-gray-50 p-3 rounded-lg text-sm">
+                <div className="font-semibold mb-2">Demo Credentials:</div>
+                <div className="space-y-1">
+                  <div><strong>Admin:</strong> admin / admin123</div>
+                  <div><strong>Customer:</strong> customer / customer123</div>
+                </div>
+              </div>
+              
               <div className="grid grid-cols-2 gap-4 pt-4">
                 <Button 
                   onClick={() => handleLogin("admin")}
@@ -213,7 +269,7 @@ const AdminContent = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,234</div>
+            <div className="text-2xl font-bold">{DUMMY_CUSTOMERS.length}</div>
             <p className="text-xs text-muted-foreground">+12% from last month</p>
           </CardContent>
         </Card>
@@ -224,7 +280,7 @@ const AdminContent = () => {
             <Phone className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">856</div>
+            <div className="text-2xl font-bold">{DUMMY_DIDS.filter(did => did.status === "Active").length}</div>
             <p className="text-xs text-muted-foreground">+8% from last month</p>
           </CardContent>
         </Card>
@@ -278,6 +334,7 @@ const AdminContent = () => {
                       <tr>
                         <th className="text-left p-4">Customer ID</th>
                         <th className="text-left p-4">Name</th>
+                        <th className="text-left p-4">Email</th>
                         <th className="text-left p-4">Type</th>
                         <th className="text-left p-4">Balance</th>
                         <th className="text-left p-4">Status</th>
@@ -285,14 +342,11 @@ const AdminContent = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {[
-                        { id: "C001", name: "John Doe", type: "Prepaid", balance: "$125.50", status: "Active" },
-                        { id: "C002", name: "Jane Smith", type: "Postpaid", balance: "$-45.20", status: "Active" },
-                        { id: "C003", name: "Bob Johnson", type: "Prepaid", balance: "$0.00", status: "Suspended" }
-                      ].map((customer, index) => (
+                      {DUMMY_CUSTOMERS.map((customer, index) => (
                         <tr key={index} className="border-b">
                           <td className="p-4">{customer.id}</td>
                           <td className="p-4">{customer.name}</td>
+                          <td className="p-4">{customer.email}</td>
                           <td className="p-4">{customer.type}</td>
                           <td className="p-4">{customer.balance}</td>
                           <td className="p-4">
@@ -341,9 +395,12 @@ const AdminContent = () => {
                   <div className="border rounded-lg p-4">
                     <h4 className="font-medium mb-2">Available Plans</h4>
                     <div className="space-y-2">
-                      {["Basic Plan - $10/month", "Standard Plan - $25/month", "Premium Plan - $50/month"].map((plan, index) => (
+                      {DUMMY_PLANS.map((plan, index) => (
                         <div key={index} className="flex justify-between items-center p-2 border rounded">
-                          <span>{plan}</span>
+                          <div>
+                            <div className="font-medium">{plan.name}</div>
+                            <div className="text-sm text-gray-600">{plan.price} • {plan.minutes}</div>
+                          </div>
                           <Button variant="outline" size="sm">Edit</Button>
                         </div>
                       ))}
@@ -376,21 +433,19 @@ const AdminContent = () => {
                         <th className="text-left p-4">Customer</th>
                         <th className="text-left p-4">Country</th>
                         <th className="text-left p-4">Monthly Rate</th>
+                        <th className="text-left p-4">Type</th>
                         <th className="text-left p-4">Status</th>
                         <th className="text-left p-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[
-                        { number: "+1-555-0123", customer: "John Doe", country: "USA", rate: "$5.00", status: "Active" },
-                        { number: "+44-20-7946-0958", customer: "Jane Smith", country: "UK", rate: "$8.00", status: "Active" },
-                        { number: "+1-555-0456", customer: "Unassigned", country: "USA", rate: "$5.00", status: "Available" }
-                      ].map((did, index) => (
+                      {DUMMY_DIDS.map((did, index) => (
                         <tr key={index} className="border-b">
                           <td className="p-4 font-mono">{did.number}</td>
                           <td className="p-4">{did.customer}</td>
                           <td className="p-4">{did.country}</td>
                           <td className="p-4">{did.rate}</td>
+                          <td className="p-4">{did.type}</td>
                           <td className="p-4">
                             <span className={`px-2 py-1 rounded-full text-xs ${
                               did.status === "Active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"
@@ -431,20 +486,18 @@ const AdminContent = () => {
                         <th className="text-left p-4">Prefix</th>
                         <th className="text-left p-4">Rate per Min</th>
                         <th className="text-left p-4">Connection Fee</th>
+                        <th className="text-left p-4">Description</th>
                         <th className="text-left p-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[
-                        { destination: "USA Local", prefix: "1", rate: "$0.02", connection: "$0.01" },
-                        { destination: "UK Mobile", prefix: "447", rate: "$0.15", connection: "$0.05" },
-                        { destination: "Canada", prefix: "1", rate: "$0.03", connection: "$0.01" }
-                      ].map((rate, index) => (
+                      {DUMMY_RATES.map((rate, index) => (
                         <tr key={index} className="border-b">
                           <td className="p-4">{rate.destination}</td>
                           <td className="p-4 font-mono">{rate.prefix}</td>
                           <td className="p-4">{rate.rate}</td>
                           <td className="p-4">{rate.connection}</td>
+                          <td className="p-4 text-sm text-gray-600">{rate.description}</td>
                           <td className="p-4">
                             <Button variant="outline" size="sm">Edit</Button>
                           </td>
@@ -467,7 +520,7 @@ const CustomerContent = () => {
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Customer Dashboard</h1>
-        <p className="text-gray-600">Manage your account and view usage</p>
+        <p className="text-gray-600">Welcome back, John Doe!</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -510,15 +563,11 @@ const CustomerContent = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {[
-                { number: "+1-555-0123", duration: "5:23", cost: "$0.11", time: "2 hours ago" },
-                { number: "+44-20-7946", duration: "12:45", cost: "$1.91", time: "5 hours ago" },
-                { number: "+1-555-0456", duration: "3:12", cost: "$0.06", time: "1 day ago" }
-              ].map((call, index) => (
+              {DUMMY_RECENT_CALLS.map((call, index) => (
                 <div key={index} className="flex justify-between items-center p-3 border rounded">
                   <div>
                     <div className="font-mono">{call.number}</div>
-                    <div className="text-sm text-gray-600">{call.time}</div>
+                    <div className="text-sm text-gray-600">{call.destination} • {call.time}</div>
                   </div>
                   <div className="text-right">
                     <div>{call.duration}</div>
@@ -537,15 +586,11 @@ const CustomerContent = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {[
-                { number: "+1-555-0123", type: "Local", status: "Active" },
-                { number: "+1-555-0456", type: "Toll-Free", status: "Active" },
-                { number: "+44-20-7946-0958", type: "International", status: "Active" }
-              ].map((did, index) => (
+              {DUMMY_DIDS.filter(did => did.customer !== "Unassigned").slice(0, 3).map((did, index) => (
                 <div key={index} className="flex justify-between items-center p-3 border rounded">
                   <div>
                     <div className="font-mono font-semibold">{did.number}</div>
-                    <div className="text-sm text-gray-600">{did.type}</div>
+                    <div className="text-sm text-gray-600">{did.type} • {did.country}</div>
                   </div>
                   <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
                     {did.status}
