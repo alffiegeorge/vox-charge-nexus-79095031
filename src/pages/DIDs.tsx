@@ -1,9 +1,22 @@
 
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import DIDForm from "@/components/DIDForm";
 
-const DUMMY_DIDS = [
+interface DID {
+  number: string;
+  customer: string;
+  country: string;
+  rate: string;
+  status: string;
+  type: string;
+  customerId?: string;
+  notes?: string;
+}
+
+const INITIAL_DIDS: DID[] = [
   { number: "+1-555-0123", customer: "John Doe", country: "USA", rate: "$5.00", status: "Active", type: "Local" },
   { number: "+44-20-7946-0958", customer: "Jane Smith", country: "UK", rate: "$8.00", status: "Active", type: "International" },
   { number: "+1-555-0456", customer: "Unassigned", country: "USA", rate: "$5.00", status: "Available", type: "Local" },
@@ -12,6 +25,37 @@ const DUMMY_DIDS = [
 ];
 
 const DIDs = () => {
+  const [dids, setDids] = useState<DID[]>(INITIAL_DIDS);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingDID, setEditingDID] = useState<DID | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const handleDIDCreated = (newDID: DID) => {
+    setDids(prev => [...prev, newDID]);
+  };
+
+  const handleDIDUpdated = (updatedDID: DID) => {
+    setDids(prev => prev.map(did => 
+      did.number === updatedDID.number ? updatedDID : did
+    ));
+    setEditingDID(null);
+  };
+
+  const handleEditDID = (did: DID) => {
+    setEditingDID(did);
+  };
+
+  const handleCloseForm = () => {
+    setShowCreateForm(false);
+    setEditingDID(null);
+  };
+
+  const filteredDids = dids.filter(did =>
+    did.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    did.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    did.country.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -27,8 +71,18 @@ const DIDs = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search DIDs..." className="max-w-sm" />
-              <Button className="bg-blue-600 hover:bg-blue-700">Add New DID</Button>
+              <Input 
+                placeholder="Search DIDs..." 
+                className="max-w-sm" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700"
+                onClick={() => setShowCreateForm(true)}
+              >
+                Add New DID
+              </Button>
             </div>
             <div className="border rounded-lg">
               <table className="w-full">
@@ -44,7 +98,7 @@ const DIDs = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_DIDS.map((did, index) => (
+                  {filteredDids.map((did, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4 font-mono">{did.number}</td>
                       <td className="p-4">{did.customer}</td>
@@ -53,13 +107,21 @@ const DIDs = () => {
                       <td className="p-4">{did.type}</td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          did.status === "Active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"
+                          did.status === "Active" ? "bg-green-100 text-green-800" : 
+                          did.status === "Available" ? "bg-yellow-100 text-yellow-800" :
+                          "bg-red-100 text-red-800"
                         }`}>
                           {did.status}
                         </span>
                       </td>
                       <td className="p-4">
-                        <Button variant="outline" size="sm">Manage</Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEditDID(did)}
+                        >
+                          Manage
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -69,6 +131,15 @@ const DIDs = () => {
           </div>
         </CardContent>
       </Card>
+
+      {(showCreateForm || editingDID) && (
+        <DIDForm
+          onClose={handleCloseForm}
+          onDIDCreated={handleDIDCreated}
+          onDIDUpdated={handleDIDUpdated}
+          editingDID={editingDID}
+        />
+      )}
     </div>
   );
 };
