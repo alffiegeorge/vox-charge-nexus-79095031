@@ -1,11 +1,29 @@
 
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import RouteForm from "@/components/RouteForm";
 
-const DUMMY_ROUTES = [
+interface Route {
+  id: string;
+  name: string;
+  prefix: string;
+  provider: string;
+  rate: string;
+  priority: number;
+  status: string;
+  quality: string;
+  sipServer?: string;
+  username?: string;
+  password?: string;
+  notes?: string;
+}
+
+const INITIAL_ROUTES: Route[] = [
   { id: "RT001", name: "Premium Route USA", prefix: "1", provider: "Carrier A", rate: "$0.015", priority: 1, status: "Active", quality: "98.5%" },
   { id: "RT002", name: "Standard Route USA", prefix: "1", provider: "Carrier B", rate: "$0.022", priority: 2, status: "Active", quality: "96.2%" },
   { id: "RT003", name: "UK Mobile Route", prefix: "447", provider: "Carrier C", rate: "$0.125", priority: 1, status: "Active", quality: "97.8%" },
@@ -13,6 +31,67 @@ const DUMMY_ROUTES = [
 ];
 
 const RouteManagement = () => {
+  const [routes, setRoutes] = useState<Route[]>(INITIAL_ROUTES);
+  const [showForm, setShowForm] = useState(false);
+  const [editingRoute, setEditingRoute] = useState<Route | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [testingRoutes, setTestingRoutes] = useState(false);
+  const { toast } = useToast();
+
+  const filteredRoutes = routes.filter(route =>
+    route.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    route.provider.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    route.prefix.includes(searchTerm)
+  );
+
+  const handleAddRoute = () => {
+    setEditingRoute(null);
+    setShowForm(true);
+  };
+
+  const handleEditRoute = (route: Route) => {
+    setEditingRoute(route);
+    setShowForm(true);
+  };
+
+  const handleRouteCreated = (newRoute: Route) => {
+    setRoutes(prev => [...prev, newRoute]);
+  };
+
+  const handleRouteUpdated = (updatedRoute: Route) => {
+    setRoutes(prev => prev.map(route => 
+      route.id === editingRoute?.id ? updatedRoute : route
+    ));
+  };
+
+  const handleTestRoutes = async () => {
+    setTestingRoutes(true);
+    
+    // Simulate route testing
+    setTimeout(() => {
+      setTestingRoutes(false);
+      toast({
+        title: "Route Test Complete",
+        description: "All active routes tested successfully. Check quality metrics for details.",
+      });
+    }, 3000);
+
+    toast({
+      title: "Testing Routes",
+      description: "Testing all active routes for connectivity and quality...",
+    });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "Active": return "default";
+      case "Standby": return "secondary";
+      case "Maintenance": return "outline";
+      case "Inactive": return "destructive";
+      default: return "secondary";
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -26,7 +105,9 @@ const RouteManagement = () => {
             <CardTitle>Active Routes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-green-600">24</div>
+            <div className="text-3xl font-bold text-green-600">
+              {routes.filter(route => route.status === "Active").length}
+            </div>
             <p className="text-sm text-gray-600">Routes operational</p>
           </CardContent>
         </Card>
@@ -60,10 +141,23 @@ const RouteManagement = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search routes..." className="max-w-sm" />
+              <Input
+                placeholder="Search routes..."
+                className="max-w-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
               <div className="flex space-x-2">
-                <Button variant="outline">Test Routes</Button>
-                <Button className="bg-blue-600 hover:bg-blue-700">Add Route</Button>
+                <Button
+                  variant="outline"
+                  onClick={handleTestRoutes}
+                  disabled={testingRoutes}
+                >
+                  {testingRoutes ? "Testing..." : "Test Routes"}
+                </Button>
+                <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleAddRoute}>
+                  Add Route
+                </Button>
               </div>
             </div>
             <div className="border rounded-lg">
@@ -82,7 +176,7 @@ const RouteManagement = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_ROUTES.map((route, index) => (
+                  {filteredRoutes.map((route, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4 font-mono">{route.id}</td>
                       <td className="p-4">{route.name}</td>
@@ -92,12 +186,18 @@ const RouteManagement = () => {
                       <td className="p-4">{route.priority}</td>
                       <td className="p-4">{route.quality}</td>
                       <td className="p-4">
-                        <Badge variant={route.status === "Active" ? "default" : "secondary"}>
+                        <Badge variant={getStatusColor(route.status)}>
                           {route.status}
                         </Badge>
                       </td>
                       <td className="p-4">
-                        <Button variant="outline" size="sm">Edit</Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditRoute(route)}
+                        >
+                          Edit
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -153,6 +253,15 @@ const RouteManagement = () => {
           </CardContent>
         </Card>
       </div>
+
+      {showForm && (
+        <RouteForm
+          onClose={() => setShowForm(false)}
+          onRouteCreated={handleRouteCreated}
+          onRouteUpdated={handleRouteUpdated}
+          editingRoute={editingRoute}
+        />
+      )}
     </div>
   );
 };
