@@ -1,9 +1,11 @@
 
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import CustomerForm from "@/components/CustomerForm";
 
-const DUMMY_CUSTOMERS = [
+const INITIAL_CUSTOMERS = [
   { id: "C001", name: "John Doe", email: "john@example.com", type: "Prepaid", balance: "$125.50", status: "Active", phone: "+1-555-0123" },
   { id: "C002", name: "Jane Smith", email: "jane@example.com", type: "Postpaid", balance: "$-45.20", status: "Active", phone: "+1-555-0456" },
   { id: "C003", name: "Bob Johnson", email: "bob@example.com", type: "Prepaid", balance: "$0.00", status: "Suspended", phone: "+1-555-0789" },
@@ -12,6 +14,20 @@ const DUMMY_CUSTOMERS = [
 ];
 
 const Customers = () => {
+  const [customers, setCustomers] = useState(INITIAL_CUSTOMERS);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const handleCustomerCreated = (newCustomer: any) => {
+    setCustomers(prev => [...prev, newCustomer]);
+  };
+
+  const filteredCustomers = customers.filter(customer =>
+    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    customer.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -27,8 +43,18 @@ const Customers = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search customers..." className="max-w-sm" />
-              <Button className="bg-blue-600 hover:bg-blue-700">Add New Customer</Button>
+              <Input 
+                placeholder="Search customers..." 
+                className="max-w-sm" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700"
+                onClick={() => setShowCreateForm(true)}
+              >
+                Add New Customer
+              </Button>
             </div>
             <div className="border rounded-lg">
               <table className="w-full">
@@ -44,7 +70,7 @@ const Customers = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_CUSTOMERS.map((customer, index) => (
+                  {filteredCustomers.map((customer, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4">{customer.id}</td>
                       <td className="p-4">{customer.name}</td>
@@ -69,6 +95,13 @@ const Customers = () => {
           </div>
         </CardContent>
       </Card>
+
+      {showCreateForm && (
+        <CustomerForm
+          onClose={() => setShowCreateForm(false)}
+          onCustomerCreated={handleCustomerCreated}
+        />
+      )}
     </div>
   );
 };
