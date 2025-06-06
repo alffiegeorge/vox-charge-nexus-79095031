@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,12 +8,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 
-interface CustomerFormProps {
-  onClose: () => void;
-  onCustomerCreated: (customer: any) => void;
+interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company?: string;
+  type: string;
+  balance: string;
+  status: string;
+  creditLimit?: string;
+  address?: string;
+  notes?: string;
+  createdAt?: string;
 }
 
-const CustomerForm = ({ onClose, onCustomerCreated }: CustomerFormProps) => {
+interface CustomerFormProps {
+  onClose: () => void;
+  onCustomerCreated?: (customer: any) => void;
+  onCustomerUpdated?: (customer: Customer) => void;
+  editingCustomer?: Customer | null;
+}
+
+const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCustomer }: CustomerFormProps) => {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -25,6 +42,21 @@ const CustomerForm = ({ onClose, onCustomerCreated }: CustomerFormProps) => {
     notes: ""
   });
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (editingCustomer) {
+      setFormData({
+        name: editingCustomer.name || "",
+        email: editingCustomer.email || "",
+        phone: editingCustomer.phone || "",
+        company: editingCustomer.company || "",
+        type: editingCustomer.type || "",
+        creditLimit: editingCustomer.creditLimit || "",
+        address: editingCustomer.address || "",
+        notes: editingCustomer.notes || ""
+      });
+    }
+  }, [editingCustomer]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,30 +70,52 @@ const CustomerForm = ({ onClose, onCustomerCreated }: CustomerFormProps) => {
       return;
     }
 
-    // Generate customer ID
-    const customerId = `C${String(Date.now()).slice(-3).padStart(3, '0')}`;
-    
-    const newCustomer = {
-      id: customerId,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      company: formData.company,
-      type: formData.type,
-      balance: formData.type === "Prepaid" ? "$0.00" : "$0.00",
-      status: "Active",
-      creditLimit: formData.creditLimit,
-      address: formData.address,
-      notes: formData.notes,
-      createdAt: new Date().toISOString()
-    };
+    if (editingCustomer) {
+      // Update existing customer
+      const updatedCustomer: Customer = {
+        ...editingCustomer,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        company: formData.company,
+        type: formData.type,
+        creditLimit: formData.creditLimit,
+        address: formData.address,
+        notes: formData.notes
+      };
 
-    onCustomerCreated(newCustomer);
-    
-    toast({
-      title: "Customer Created",
-      description: `Customer ${formData.name} has been created successfully`,
-    });
+      onCustomerUpdated?.(updatedCustomer);
+      
+      toast({
+        title: "Customer Updated",
+        description: `Customer ${formData.name} has been updated successfully`,
+      });
+    } else {
+      // Create new customer
+      const customerId = `C${String(Date.now()).slice(-3).padStart(3, '0')}`;
+      
+      const newCustomer = {
+        id: customerId,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        company: formData.company,
+        type: formData.type,
+        balance: formData.type === "Prepaid" ? "$0.00" : "$0.00",
+        status: "Active",
+        creditLimit: formData.creditLimit,
+        address: formData.address,
+        notes: formData.notes,
+        createdAt: new Date().toISOString()
+      };
+
+      onCustomerCreated?.(newCustomer);
+      
+      toast({
+        title: "Customer Created",
+        description: `Customer ${formData.name} has been created successfully`,
+      });
+    }
     
     onClose();
   };
@@ -74,8 +128,10 @@ const CustomerForm = ({ onClose, onCustomerCreated }: CustomerFormProps) => {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <CardHeader>
-          <CardTitle>Create New Customer</CardTitle>
-          <CardDescription>Add a new customer to the system</CardDescription>
+          <CardTitle>{editingCustomer ? 'Edit Customer' : 'Create New Customer'}</CardTitle>
+          <CardDescription>
+            {editingCustomer ? 'Update customer information' : 'Add a new customer to the system'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -167,7 +223,7 @@ const CustomerForm = ({ onClose, onCustomerCreated }: CustomerFormProps) => {
                 Cancel
               </Button>
               <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
-                Create Customer
+                {editingCustomer ? 'Update Customer' : 'Create Customer'}
               </Button>
             </div>
           </form>

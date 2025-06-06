@@ -5,7 +5,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import CustomerForm from "@/components/CustomerForm";
 
-const INITIAL_CUSTOMERS = [
+interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company?: string;
+  type: string;
+  balance: string;
+  status: string;
+  creditLimit?: string;
+  address?: string;
+  notes?: string;
+  createdAt?: string;
+}
+
+const INITIAL_CUSTOMERS: Customer[] = [
   { id: "C001", name: "John Doe", email: "john@example.com", type: "Prepaid", balance: "$125.50", status: "Active", phone: "+1-555-0123" },
   { id: "C002", name: "Jane Smith", email: "jane@example.com", type: "Postpaid", balance: "$-45.20", status: "Active", phone: "+1-555-0456" },
   { id: "C003", name: "Bob Johnson", email: "bob@example.com", type: "Prepaid", balance: "$0.00", status: "Suspended", phone: "+1-555-0789" },
@@ -14,12 +29,29 @@ const INITIAL_CUSTOMERS = [
 ];
 
 const Customers = () => {
-  const [customers, setCustomers] = useState(INITIAL_CUSTOMERS);
+  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const handleCustomerCreated = (newCustomer: any) => {
+  const handleCustomerCreated = (newCustomer: Customer) => {
     setCustomers(prev => [...prev, newCustomer]);
+  };
+
+  const handleCustomerUpdated = (updatedCustomer: Customer) => {
+    setCustomers(prev => prev.map(customer => 
+      customer.id === updatedCustomer.id ? updatedCustomer : customer
+    ));
+    setEditingCustomer(null);
+  };
+
+  const handleEditCustomer = (customer: Customer) => {
+    setEditingCustomer(customer);
+  };
+
+  const handleCloseForm = () => {
+    setShowCreateForm(false);
+    setEditingCustomer(null);
   };
 
   const filteredCustomers = customers.filter(customer =>
@@ -85,7 +117,13 @@ const Customers = () => {
                         </span>
                       </td>
                       <td className="p-4">
-                        <Button variant="outline" size="sm">Edit</Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEditCustomer(customer)}
+                        >
+                          Edit
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -96,10 +134,12 @@ const Customers = () => {
         </CardContent>
       </Card>
 
-      {showCreateForm && (
+      {(showCreateForm || editingCustomer) && (
         <CustomerForm
-          onClose={() => setShowCreateForm(false)}
+          onClose={handleCloseForm}
           onCustomerCreated={handleCustomerCreated}
+          onCustomerUpdated={handleCustomerUpdated}
+          editingCustomer={editingCustomer}
         />
       )}
     </div>
