@@ -512,7 +512,7 @@ const CustomerSettings = () => {
             </Button>
           </div>
         </CardContent>
-      </div>
+      </Card>
     </div>
   );
 };
