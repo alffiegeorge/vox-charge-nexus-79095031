@@ -8,39 +8,68 @@ import { Phone, Users, CreditCard, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 
-// Dummy login credentials
-const DUMMY_CREDENTIALS = {
-  admin: { username: "admin", password: "admin123" },
-  customer: { username: "customer", password: "customer123" }
-};
-
 const Index = () => {
   const [loginData, setLoginData] = useState({ username: "", password: "" });
+  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const handleLogin = (type: "admin" | "customer") => {
-    const credentials = DUMMY_CREDENTIALS[type];
-    
-    if (loginData.username !== credentials.username || loginData.password !== credentials.password) {
+  const handleLogin = async () => {
+    if (!loginData.username || !loginData.password) {
       toast({
         title: "Login Failed",
-        description: `Invalid credentials. Use ${credentials.username}/${credentials.password}`,
+        description: "Please enter both username and password",
         variant: "destructive"
       });
       return;
     }
-    
-    toast({
-      title: "Login Successful",
-      description: `Welcome ${type === "admin" ? "Administrator" : "Customer"}!`
-    });
 
-    // Navigate to appropriate dashboard
-    if (type === "admin") {
-      navigate("/admin");
-    } else {
-      navigate("/customer");
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(loginData)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Store authentication token
+        localStorage.setItem('authToken', data.token);
+        localStorage.setItem('userRole', data.user.role);
+        localStorage.setItem('username', data.user.username);
+
+        toast({
+          title: "Login Successful",
+          description: `Welcome ${data.user.role === "admin" ? "Administrator" : "Customer"}!`
+        });
+
+        // Navigate to appropriate dashboard
+        if (data.user.role === "admin") {
+          navigate("/admin");
+        } else {
+          navigate("/customer");
+        }
+      } else {
+        toast({
+          title: "Login Failed",
+          description: data.error || "Invalid credentials",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      toast({
+        title: "Login Failed",
+        description: "Unable to connect to server. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -56,7 +85,7 @@ const Index = () => {
         <Card className="shadow-xl">
           <CardHeader>
             <CardTitle>Login to Your Account</CardTitle>
-            <CardDescription>Choose your login type to continue</CardDescription>
+            <CardDescription>Enter your credentials to continue</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -66,6 +95,7 @@ const Index = () => {
                 placeholder="Enter your username"
                 value={loginData.username}
                 onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
+                disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
@@ -76,10 +106,12 @@ const Index = () => {
                 placeholder="Enter your password"
                 value={loginData.password}
                 onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                disabled={isLoading}
+                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
               />
             </div>
             
-            {/* Dummy credentials display */}
+            {/* Demo credentials display */}
             <div className="bg-gray-50 p-3 rounded-lg text-sm">
               <div className="font-semibold mb-2">Demo Credentials:</div>
               <div className="space-y-1">
@@ -88,23 +120,13 @@ const Index = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4 pt-4">
-              <Button 
-                onClick={() => handleLogin("admin")}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                Admin Login
-              </Button>
-              <Button 
-                onClick={() => handleLogin("customer")}
-                variant="outline"
-                className="border-blue-600 text-blue-600 hover:bg-blue-50"
-              >
-                <Users className="h-4 w-4 mr-2" />
-                Customer Login
-              </Button>
-            </div>
+            <Button 
+              onClick={handleLogin}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              disabled={isLoading}
+            >
+              {isLoading ? "Logging in..." : "Login"}
+            </Button>
           </CardContent>
         </Card>
       </div>

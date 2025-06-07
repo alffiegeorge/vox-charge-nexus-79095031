@@ -46,11 +46,47 @@ async function initializeDatabase() {
     connection.release();
     console.log('✓ Database connection test successful');
     
+    // Create users table if it doesn't exist
+    await createUsersTable();
+    
   } catch (error) {
     console.error('✗ Database connection failed:', error.message);
     console.error('Please check your database configuration and ensure MySQL is running');
     // Don't exit the process, allow the server to start without DB for debugging
     console.log('Server will start without database connection for debugging');
+  }
+}
+
+async function createUsersTable() {
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
+        status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Check if admin user exists, if not create it
+    const [existingUsers] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin']);
+    
+    if (existingUsers[0].count === 0) {
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await db.execute(
+        'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
+        ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
+      );
+      console.log('✓ Default admin user created with password: admin123');
+    }
+    
+    console.log('✓ Users table ready');
+  } catch (error) {
+    console.error('Error setting up users table:', error.message);
   }
 }
 
