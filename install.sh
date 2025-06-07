@@ -6,6 +6,8 @@
 # Exit on error
 set -e
 
+# ... keep existing code (colors, utility functions, check_and_setup_sudo function)
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -124,8 +126,6 @@ fi
 check_and_setup_sudo
 
 print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
-
-# ... keep existing code (generate_password function and all other functions remain the same)
 
 generate_password() {
     openssl rand -base64 32
@@ -299,9 +299,7 @@ server {
 EOF
 }
 
-# ... keep existing code (all remaining functions stay exactly the same)
-
-# Setup database
+# Setup database with modern MariaDB syntax
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -310,10 +308,14 @@ setup_database() {
     sudo systemctl start mariadb
     sudo systemctl enable mariadb
 
-    # Secure MariaDB installation
+    # Get MariaDB version to determine the correct syntax
+    MARIADB_VERSION=$(sudo mysql --version | grep -oP '\d+\.\d+' | head -1)
+    
+    # Secure MariaDB installation with modern syntax
     print_status "Securing MariaDB installation..."
     sudo mysql -u root <<EOF
-UPDATE mysql.user SET Password=PASSWORD('${mysql_root_password}') WHERE User='root';
+-- Use modern authentication method for MariaDB 10.4+
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
 DELETE FROM mysql.user WHERE User='';
 DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
 DROP DATABASE IF EXISTS test;
@@ -336,6 +338,8 @@ EOF
     
     print_status "Database setup completed successfully"
 }
+
+# ... keep existing code (setup_odbc, install_asterisk, setup_web, perform_system_checks, display_installation_summary functions)
 
 # Setup ODBC
 setup_odbc() {
@@ -599,3 +603,4 @@ EOF
 
 # Execute main function
 main "$@"
+
