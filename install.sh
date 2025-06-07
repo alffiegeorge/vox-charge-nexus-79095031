@@ -298,7 +298,7 @@ server {
 EOF
 }
 
-# Setup database with proper Debian 12 MariaDB handling
+# Setup database with proper handling for existing installations
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -307,10 +307,15 @@ setup_database() {
     sudo systemctl start mariadb
     sudo systemctl enable mariadb
 
-    # On Debian 12, MariaDB uses unix_socket authentication by default for root
-    # We need to use sudo mysql instead of mysql -u root
-    print_status "Securing MariaDB installation..."
-    sudo mysql <<EOF
+    # Check if MariaDB is already configured by trying different connection methods
+    print_status "Checking MariaDB configuration status..."
+    
+    # Try to connect without password (fresh installation)
+    if sudo mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "MariaDB is using socket authentication - setting up for first time..."
+        
+        # Secure MariaDB installation for fresh install
+        sudo mysql <<EOF
 -- Set root password and switch to mysql_native_password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
 -- Remove anonymous users
@@ -323,10 +328,53 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 -- Reload privileges
 FLUSH PRIVILEGES;
 EOF
+        
+    elif mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "MariaDB root password is already set and matches - continuing..."
+        
+    else
+        print_warning "MariaDB root password is set but doesn't match our generated password"
+        print_status "This might be from a previous installation attempt"
+        
+        # Try to reset MariaDB to use our password
+        print_status "Attempting to reset MariaDB configuration..."
+        
+        # Stop MariaDB
+        sudo systemctl stop mariadb
+        
+        # Start MariaDB in safe mode to reset password
+        sudo mysqld_safe --skip-grant-tables --skip-networking &
+        SAFE_PID=$!
+        sleep 5
+        
+        # Reset root password
+        mysql -u root <<EOF
+FLUSH PRIVILEGES;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
+FLUSH PRIVILEGES;
+EOF
+        
+        # Kill safe mode process
+        sudo kill $SAFE_PID 2>/dev/null || true
+        sleep 2
+        
+        # Restart MariaDB normally
+        sudo systemctl start mariadb
+        
+        # Verify the password works
+        if ! mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+            print_error "Failed to reset MariaDB root password"
+            print_status "Please manually reset MariaDB and run the script again"
+            print_status "You can reset MariaDB with: sudo mysql_secure_installation"
+            exit 1
+        fi
+        
+        print_status "✓ MariaDB root password reset successfully"
+    fi
 
     # Create Asterisk database and user
     print_status "Creating Asterisk database and user..."
-    sudo mysql -u root -p"${mysql_root_password}" <<EOF
+    mysql -u root -p"${mysql_root_password}" <<EOF
 CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
@@ -335,7 +383,7 @@ EOF
 
     # Create database tables
     print_status "Creating database tables..."
-    sudo mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
+    mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
     
     print_status "Database setup completed successfully"
 }
