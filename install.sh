@@ -413,76 +413,96 @@ setup_odbc() {
     print_status "ODBC configuration completed"
 }
 
-# ... keep existing code (install_asterisk, setup_web, perform_system_checks, display_installation_summary, main functions)
-
-# Install Asterisk with improved error handling
+# Install Asterisk with improved error handling and dependency checking
 install_asterisk() {
     local asterisk_db_password=$1
     
     print_status "Installing Asterisk with ODBC support..."
     
-    # Check if already in the source directory
-    if [ ! -d "/usr/src/asterisk-20"* ]; then
+    # Check if we're already in an asterisk source directory
+    ASTERISK_DIR=""
+    if [ -d "/usr/src/asterisk-20"* ]; then
+        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
+        print_status "Found existing Asterisk source directory: $ASTERISK_DIR"
+    fi
+    
+    # If no existing directory, download and extract
+    if [ -z "$ASTERISK_DIR" ]; then
         cd /usr/src
         
-        # Download and extract Asterisk if not already done
+        # Download Asterisk if not already downloaded
         if [ ! -f "asterisk-20-current.tar.gz" ]; then
             print_status "Downloading Asterisk..."
             sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
+        else
+            print_status "Asterisk source archive already exists"
         fi
         
+        # Extract if not already extracted
         if [ ! -d "asterisk-20"* ]; then
             print_status "Extracting Asterisk..."
             sudo tar xzf asterisk-20-current.tar.gz
+        else
+            print_status "Asterisk source already extracted"
         fi
         
-        cd asterisk-20*/
-    else
-        cd /usr/src/asterisk-20*/
-        print_status "Using existing Asterisk source directory..."
+        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
     fi
+    
+    cd "$ASTERISK_DIR"
+    print_status "Working in directory: $ASTERISK_DIR"
 
     # Get MP3 source if needed
-    print_status "Getting MP3 source..."
+    print_status "Checking MP3 source..."
     if [ ! -f "addons/mp3/mpg123.h" ]; then
+        print_status "Getting MP3 source..."
         sudo contrib/scripts/get_mp3_source.sh
     else
         print_status "MP3 source already present"
     fi
 
-    # Configure Asterisk build
-    print_status "Configuring Asterisk build..."
+    # Configure Asterisk build if not already configured
     if [ ! -f "config.log" ]; then
+        print_status "Configuring Asterisk build..."
         sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
         if [ $? -ne 0 ]; then
             print_error "Asterisk configure failed"
             exit 1
         fi
     else
-        print_status "Asterisk already configured"
+        print_status "Asterisk build already configured"
     fi
 
-    # Enable required modules
-    print_status "Configuring Asterisk modules..."
+    # Create menuselect configuration if needed
     if [ ! -f "menuselect.makeopts" ]; then
+        print_status "Creating menuselect configuration..."
         sudo make menuselect.makeopts
-    fi
-    
-    # Enable ODBC modules
-    sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts || true
-    sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts || true
-    sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts || true
-
-    # Build Asterisk
-    print_status "Building Asterisk (this may take 10-20 minutes)..."
-    if [ ! -f "main/asterisk" ]; then
-        sudo make -j$(nproc)
         if [ $? -ne 0 ]; then
-            print_error "Asterisk build failed"
+            print_error "Failed to create menuselect configuration"
             exit 1
         fi
     else
-        print_status "Asterisk already built"
+        print_status "Menuselect configuration already exists"
+    fi
+    
+    # Enable ODBC modules
+    print_status "Configuring required modules..."
+    sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
+    sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts 2>/dev/null || true
+    sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
+
+    # Build Asterisk if not already built
+    if [ ! -f "main/asterisk" ]; then
+        print_status "Building Asterisk (this may take 10-20 minutes)..."
+        sudo make -j$(nproc)
+        if [ $? -ne 0 ]; then
+            print_error "Asterisk build failed"
+            print_error "This might be due to missing dependencies or compilation errors"
+            print_status "Check the output above for specific error messages"
+            exit 1
+        fi
+    else
+        print_status "Asterisk already built, skipping compilation"
     fi
 
     # Install Asterisk
@@ -493,10 +513,13 @@ install_asterisk() {
         exit 1
     fi
 
-    # Install sample configs and init scripts
+    # Install sample configs and init scripts if not already done
     if [ ! -f "/etc/asterisk/asterisk.conf" ]; then
+        print_status "Installing sample configurations..."
         sudo make samples
         sudo make config
+    else
+        print_status "Asterisk configuration files already exist"
     fi
     
     sudo ldconfig
@@ -507,6 +530,8 @@ install_asterisk() {
         sudo groupadd -r asterisk
         sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
         sudo usermod -aG audio,dialout asterisk
+    else
+        print_status "Asterisk user already exists"
     fi
 
     # Set proper ownership for asterisk directories
@@ -650,7 +675,7 @@ main() {
     # 2. Create configuration files
     create_config_files
 
-    # 3. Update system and install dependencies
+    # 3. Update system and install dependencies (including libcurl for Asterisk)
     print_status "Updating system and installing dependencies..."
     sudo apt update && sudo apt upgrade -y
     sudo apt install -y mariadb-server git curl unixodbc unixodbc-dev libmariadb-dev odbc-mariadb \
@@ -659,7 +684,7 @@ main() {
         libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev libnewt-dev \
         libpopt-dev libical-dev libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
         libradcli-dev libneon27-dev libgmime-3.0-dev liburiparser-dev libxslt1-dev \
-        python3-dev python3-pip nginx certbot python3-certbot-nginx
+        python3-dev python3-pip nginx certbot python3-certbot-nginx libcurl4-openssl-dev
 
     # 4. Generate passwords
     MYSQL_ROOT_PASSWORD=$(generate_password)
