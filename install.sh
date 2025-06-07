@@ -1,17 +1,8 @@
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
 # Exit on error
 set -e
-
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   echo -e "\033[0;31m[ERROR]\033[0m This script should not be run as root for security reasons"
-   exit 1
-fi
-
-echo -e "\033[0;32m[INFO]\033[0m Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,6 +22,56 @@ print_warning() {
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+# Check and setup sudo access
+check_and_setup_sudo() {
+    print_status "Checking sudo access..."
+    
+    # Check if user has sudo access
+    if sudo -n true 2>/dev/null; then
+        print_status "✓ User has sudo access"
+        return 0
+    fi
+    
+    print_warning "Current user ($USER) does not have sudo access"
+    print_status "Adding user to sudo group..."
+    
+    # Ask for root password
+    echo -n "Please enter root password to add $USER to sudo group: "
+    read -s ROOT_PASSWORD
+    echo ""
+    
+    # Check if usermod is available, install if needed
+    if ! command -v usermod &> /dev/null; then
+        print_status "Installing usermod (part of passwd package)..."
+        echo "$ROOT_PASSWORD" | su -c "apt update && apt install -y passwd" root
+    fi
+    
+    # Add user to sudo group
+    echo "$ROOT_PASSWORD" | su -c "usermod -aG sudo $USER" root
+    
+    if [ $? -eq 0 ]; then
+        print_status "✓ User $USER added to sudo group successfully"
+        print_warning "Please log out and log back in, or run 'newgrp sudo' to activate sudo access"
+        print_status "Then run this script again"
+        exit 0
+    else
+        print_error "Failed to add user to sudo group"
+        exit 1
+    fi
+}
+
+# Check if running as root
+if [[ $EUID -eq 0 ]]; then
+   print_error "This script should not be run as root for security reasons"
+   print_status "Please run as a regular user. The script will ask for sudo when needed."
+   exit 1
+fi
+
+# Check and setup sudo access
+check_and_setup_sudo
+
+print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
 generate_password() {
     openssl rand -base64 32
