@@ -2,6 +2,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
 
 const DUMMY_CALL_HISTORY = [
   { date: "2024-01-05", time: "14:32", number: "+1-555-0123", destination: "New York, USA", duration: "5:23", cost: "$0.11", status: "Completed" },
@@ -14,6 +16,65 @@ const DUMMY_CALL_HISTORY = [
 ];
 
 const CustomerCallHistory = () => {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [filteredCalls, setFilteredCalls] = useState(DUMMY_CALL_HISTORY);
+
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    filterCalls(value, filterDate);
+  };
+
+  const handleDateFilter = (date: string) => {
+    setFilterDate(date);
+    filterCalls(searchTerm, date);
+  };
+
+  const filterCalls = (search: string, date: string) => {
+    let filtered = DUMMY_CALL_HISTORY;
+
+    if (search) {
+      filtered = filtered.filter(call => 
+        call.number.toLowerCase().includes(search.toLowerCase()) ||
+        call.destination.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+
+    if (date) {
+      filtered = filtered.filter(call => call.date === date);
+    }
+
+    setFilteredCalls(filtered);
+
+    toast({
+      title: "Filters Applied",
+      description: `Found ${filtered.length} matching calls`,
+    });
+  };
+
+  const handleExportCalls = () => {
+    toast({
+      title: "Export Started",
+      description: "Your call history is being exported to CSV...",
+    });
+
+    // Simulate export process
+    setTimeout(() => {
+      toast({
+        title: "Export Complete",
+        description: "Call history has been downloaded successfully",
+      });
+    }, 2000);
+  };
+
+  const handleCallDetails = (callNumber: string) => {
+    toast({
+      title: "Call Details",
+      description: `Loading detailed information for ${callNumber}`,
+    });
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -29,10 +90,25 @@ const CustomerCallHistory = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search calls..." className="max-w-sm" />
+              <Input 
+                placeholder="Search calls..." 
+                className="max-w-sm" 
+                value={searchTerm}
+                onChange={(e) => handleSearch(e.target.value)}
+              />
               <div className="flex space-x-2">
-                <Input type="date" className="max-w-40" />
-                <Button variant="outline">Filter</Button>
+                <Input 
+                  type="date" 
+                  className="max-w-40" 
+                  value={filterDate}
+                  onChange={(e) => handleDateFilter(e.target.value)}
+                />
+                <Button 
+                  variant="outline"
+                  onClick={handleExportCalls}
+                >
+                  Export
+                </Button>
               </div>
             </div>
             <div className="border rounded-lg">
@@ -46,10 +122,11 @@ const CustomerCallHistory = () => {
                     <th className="text-left p-4">Duration</th>
                     <th className="text-left p-4">Cost</th>
                     <th className="text-left p-4">Status</th>
+                    <th className="text-left p-4">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_CALL_HISTORY.map((call, index) => (
+                  {filteredCalls.map((call, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4">{call.date}</td>
                       <td className="p-4">{call.time}</td>
@@ -63,6 +140,15 @@ const CustomerCallHistory = () => {
                         }`}>
                           {call.status}
                         </span>
+                      </td>
+                      <td className="p-4">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleCallDetails(call.number)}
+                        >
+                          Details
+                        </Button>
                       </td>
                     </tr>
                   ))}
