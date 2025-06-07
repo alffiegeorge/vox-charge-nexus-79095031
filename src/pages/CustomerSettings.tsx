@@ -4,8 +4,54 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { QrCode, RefreshCw, Download } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
 
 const CustomerSettings = () => {
+  const { toast } = useToast();
+  const [qrCodeData, setQrCodeData] = useState("voiceflow://login?token=customer123&server=demo.voiceflow.com&expires=1735689600");
+
+  const generateQRCode = () => {
+    // Generate new QR code with fresh token
+    const newToken = Math.random().toString(36).substring(2, 15);
+    const expiresAt = Date.now() + (24 * 60 * 60 * 1000); // 24 hours from now
+    const newQRData = `voiceflow://login?token=${newToken}&server=demo.voiceflow.com&expires=${expiresAt}`;
+    setQrCodeData(newQRData);
+    
+    toast({
+      title: "QR Code Generated",
+      description: "New QR code has been generated for mobile app login.",
+    });
+  };
+
+  const downloadQRCode = () => {
+    // Create canvas and generate QR code image for download
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 200;
+    canvas.height = 200;
+    
+    if (ctx) {
+      // Simple QR code pattern simulation for demo
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, 200, 200);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(10, 10, 180, 180);
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.download = 'voiceflow-login-qr.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+    
+    toast({
+      title: "QR Code Downloaded",
+      description: "QR code image has been saved to your downloads.",
+    });
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -37,6 +83,52 @@ const CustomerSettings = () => {
               <Input placeholder="Your Company" />
             </div>
             <Button className="w-full bg-blue-600 hover:bg-blue-700">Update Profile</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Mobile App Login</CardTitle>
+            <CardDescription>Scan QR code to login to VoiceFlow mobile app</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col items-center space-y-4">
+              <div className="w-48 h-48 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                  <QrCode className="h-16 w-16 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">QR Code for Mobile Login</p>
+                  <p className="text-xs text-gray-400 mt-1">Scan with VoiceFlow app</p>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 max-w-48 break-all font-mono bg-gray-100 p-2 rounded">
+                {qrCodeData}
+              </div>
+              <div className="flex space-x-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={generateQRCode}
+                  className="flex items-center space-x-1"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Regenerate</span>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={downloadQRCode}
+                  className="flex items-center space-x-1"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download</span>
+                </Button>
+              </div>
+              <div className="text-xs text-gray-500 text-center">
+                <p>• QR code expires in 24 hours</p>
+                <p>• Use VoiceFlow mobile app to scan</p>
+                <p>• Regenerate if code expires</p>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
