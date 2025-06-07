@@ -4,6 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import { Search, Download, Eye, Plus, Filter } from "lucide-react";
 
 const DUMMY_PORTING = [
   { id: "PORT-001", number: "+1-555-0123", customer: "TechCorp Ltd", type: "Port-In", carrier: "Verizon", status: "In Progress", date: "2024-01-03", eta: "2024-01-10" },
@@ -13,6 +17,91 @@ const DUMMY_PORTING = [
 ];
 
 const NumberPorting = () => {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedPort, setSelectedPort] = useState<any>(null);
+  const [formData, setFormData] = useState({
+    phoneNumber: "",
+    customer: "",
+    portType: "Port-In",
+    carrier: "",
+    accountNumber: ""
+  });
+
+  const handleSubmitRequest = () => {
+    if (!formData.phoneNumber || !formData.customer || !formData.carrier || !formData.accountNumber) {
+      toast({
+        title: "Error",
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    toast({
+      title: "Port Request Submitted",
+      description: `Port request for ${formData.phoneNumber} has been submitted successfully`
+    });
+
+    // Reset form
+    setFormData({
+      phoneNumber: "",
+      customer: "",
+      portType: "Port-In",
+      carrier: "",
+      accountNumber: ""
+    });
+  };
+
+  const handleExportReport = () => {
+    toast({
+      title: "Export Started",
+      description: "Your porting report is being generated and will be downloaded shortly"
+    });
+
+    // Simulate export
+    setTimeout(() => {
+      const data = filteredPorting.map(port => ({
+        "Request ID": port.id,
+        "Phone Number": port.number,
+        "Customer": port.customer,
+        "Type": port.type,
+        "Carrier": port.carrier,
+        "Status": port.status,
+        "Date": port.date,
+        "ETA": port.eta
+      }));
+
+      const csvContent = "data:text/csv;charset=utf-8," 
+        + Object.keys(data[0]).join(",") + "\n"
+        + data.map(row => Object.values(row).join(",")).join("\n");
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `porting_report_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: "Export Complete",
+        description: "Porting report has been downloaded successfully"
+      });
+    }, 2000);
+  };
+
+  const handleViewPort = (port: any) => {
+    setSelectedPort(port);
+  };
+
+  const filteredPorting = DUMMY_PORTING.filter(port =>
+    port.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    port.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    port.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    port.carrier.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -65,39 +154,64 @@ const NumberPorting = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader>
-            <CardTitle>New Port Request</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              New Port Request
+            </CardTitle>
             <CardDescription>Submit a new number porting request</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Phone Number</Label>
-              <Input placeholder="+1-555-0123" />
+              <Label>Phone Number *</Label>
+              <Input 
+                placeholder="+1-555-0123" 
+                value={formData.phoneNumber}
+                onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Customer</Label>
-              <select className="w-full border rounded-md p-2">
-                <option>Select Customer</option>
-                <option>TechCorp Ltd</option>
-                <option>Global Communications</option>
-                <option>StartUp Inc</option>
+              <Label>Customer *</Label>
+              <select 
+                className="w-full border rounded-md p-2"
+                value={formData.customer}
+                onChange={(e) => setFormData({...formData, customer: e.target.value})}
+              >
+                <option value="">Select Customer</option>
+                <option value="TechCorp Ltd">TechCorp Ltd</option>
+                <option value="Global Communications">Global Communications</option>
+                <option value="StartUp Inc">StartUp Inc</option>
               </select>
             </div>
             <div className="space-y-2">
               <Label>Port Type</Label>
-              <select className="w-full border rounded-md p-2">
-                <option>Port-In</option>
-                <option>Port-Out</option>
+              <select 
+                className="w-full border rounded-md p-2"
+                value={formData.portType}
+                onChange={(e) => setFormData({...formData, portType: e.target.value})}
+              >
+                <option value="Port-In">Port-In</option>
+                <option value="Port-Out">Port-Out</option>
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Current Carrier</Label>
-              <Input placeholder="Verizon, AT&T, etc." />
+              <Label>Current Carrier *</Label>
+              <Input 
+                placeholder="Verizon, AT&T, etc." 
+                value={formData.carrier}
+                onChange={(e) => setFormData({...formData, carrier: e.target.value})}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Account Number</Label>
-              <Input placeholder="Carrier account number" />
+              <Label>Account Number *</Label>
+              <Input 
+                placeholder="Carrier account number" 
+                value={formData.accountNumber}
+                onChange={(e) => setFormData({...formData, accountNumber: e.target.value})}
+              />
             </div>
-            <Button className="w-full bg-blue-600 hover:bg-blue-700">Submit Request</Button>
+            <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={handleSubmitRequest}>
+              Submit Request
+            </Button>
           </CardContent>
         </Card>
 
@@ -155,9 +269,20 @@ const NumberPorting = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <Input placeholder="Search porting requests..." className="max-w-sm" />
-              <Button variant="outline">Export Report</Button>
+            <div className="flex justify-between items-center gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Search porting requests..." 
+                  className="pl-8"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <Button variant="outline" onClick={handleExportReport}>
+                <Download className="h-4 w-4 mr-2" />
+                Export Report
+              </Button>
             </div>
             <div className="border rounded-lg">
               <table className="w-full">
@@ -175,7 +300,7 @@ const NumberPorting = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_PORTING.map((port, index) => (
+                  {filteredPorting.map((port, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4 font-mono">{port.id}</td>
                       <td className="p-4">{port.number}</td>
@@ -195,12 +320,86 @@ const NumberPorting = () => {
                       <td className="p-4">{port.date}</td>
                       <td className="p-4">{port.eta}</td>
                       <td className="p-4">
-                        <Button variant="outline" size="sm">View</Button>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button variant="outline" size="sm" onClick={() => handleViewPort(port)}>
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>Port Request Details - {port.id}</DialogTitle>
+                              <DialogDescription>
+                                Complete information about this porting request
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid grid-cols-2 gap-4 py-4">
+                              <div className="space-y-4">
+                                <div>
+                                  <Label className="text-sm font-medium">Phone Number</Label>
+                                  <p className="text-lg font-mono">{port.number}</p>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Customer</Label>
+                                  <p>{port.customer}</p>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Port Type</Label>
+                                  <p>{port.type}</p>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Current Carrier</Label>
+                                  <p>{port.carrier}</p>
+                                </div>
+                              </div>
+                              <div className="space-y-4">
+                                <div>
+                                  <Label className="text-sm font-medium">Status</Label>
+                                  <div className="mt-1">
+                                    <Badge variant={
+                                      port.status === "Completed" ? "default" :
+                                      port.status === "In Progress" ? "secondary" :
+                                      port.status === "Rejected" ? "destructive" :
+                                      "outline"
+                                    }>
+                                      {port.status}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Request Date</Label>
+                                  <p>{port.date}</p>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Estimated Completion</Label>
+                                  <p>{port.eta}</p>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium">Actions</Label>
+                                  <div className="flex gap-2 mt-2">
+                                    <Button size="sm" variant="outline">
+                                      Update Status
+                                    </Button>
+                                    <Button size="sm" variant="outline">
+                                      Contact Carrier
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {filteredPorting.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  No porting requests found matching your search.
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
