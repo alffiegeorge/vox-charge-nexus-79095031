@@ -5,7 +5,7 @@
 # Exit on error
 set -e
 
-# ... keep existing code (colors, utility functions, check_and_setup_sudo function)
+# ... keep existing code (colors, utility functions, check_and_setup_sudo function, main function start, create_config_files, setup_database functions)
 
 # Colors for output
 RED='\033[0;31m'
@@ -399,7 +399,8 @@ setup_odbc() {
 
     # Write ODBC DSN config from template
     sudo cp /tmp/ibilling-config/odbc.ini.template /etc/odbc.ini
-    sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/odbc.ini
+    # Use | as delimiter instead of / to avoid conflicts with file paths
+    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/odbc.ini
 
     # Test ODBC connection
     print_status "Testing ODBC connection..."
@@ -411,6 +412,8 @@ setup_odbc() {
 
     print_status "ODBC configuration completed"
 }
+
+# ... keep existing code (install_asterisk, setup_web, perform_system_checks, display_installation_summary, main functions)
 
 # Install Asterisk with improved error handling
 install_asterisk() {
@@ -523,8 +526,8 @@ install_asterisk() {
     sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
     sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
 
-    # Replace password placeholder in configuration files
-    sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
+    # Replace password placeholder in configuration files using | delimiter
+    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/asterisk/res_odbc.conf
 
     # Start and enable Asterisk
     sudo systemctl enable asterisk
