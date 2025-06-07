@@ -122,31 +122,46 @@ app.get('/health', (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    
+    console.log('Login attempt for username:', username);
 
     if (!username || !password) {
+      console.log('Missing username or password');
       return res.status(400).json({ error: 'Username and password required' });
     }
 
     if (!db) {
+      console.log('Database not available');
       return res.status(500).json({ error: 'Database not available' });
     }
 
     // Check users table for authentication
+    console.log('Querying database for user:', username);
     const [users] = await db.execute(
       'SELECT * FROM users WHERE username = ? AND status = "active"',
       [username]
     );
 
+    console.log('Database query result:', users.length > 0 ? 'User found' : 'User not found');
+
     if (users.length === 0) {
+      console.log('Invalid credentials - user not found or inactive');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const user = users[0];
+    console.log('User found, checking password...');
+    console.log('Stored hash:', user.password);
+    
     const isValidPassword = await bcrypt.compare(password, user.password);
+    console.log('Password validation result:', isValidPassword);
 
     if (!isValidPassword) {
+      console.log('Invalid credentials - wrong password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    console.log('Login successful for user:', username);
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role },

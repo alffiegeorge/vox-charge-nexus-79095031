@@ -4,9 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Phone, Users, CreditCard, Settings } from "lucide-react";
+import { Phone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { apiClient } from "@/lib/api";
 
 const Index = () => {
   const [loginData, setLoginData] = useState({ username: "", password: "" });
@@ -27,45 +28,37 @@ const Index = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(loginData)
+      console.log('Attempting login with:', { username: loginData.username });
+      
+      const response = await apiClient.login({
+        username: loginData.username,
+        password: loginData.password
       });
 
-      const data = await response.json();
+      console.log('Login response:', response);
 
-      if (response.ok) {
-        // Store authentication token
-        localStorage.setItem('authToken', data.token);
-        localStorage.setItem('userRole', data.user.role);
-        localStorage.setItem('username', data.user.username);
+      // Store authentication token
+      localStorage.setItem('authToken', response.token);
+      localStorage.setItem('userRole', response.user.role);
+      localStorage.setItem('username', response.user.username);
 
-        toast({
-          title: "Login Successful",
-          description: `Welcome ${data.user.role === "admin" ? "Administrator" : "Customer"}!`
-        });
+      toast({
+        title: "Login Successful",
+        description: `Welcome ${response.user.role === "admin" ? "Administrator" : "Customer"}!`
+      });
 
-        // Navigate to appropriate dashboard
-        if (data.user.role === "admin") {
-          navigate("/admin");
-        } else {
-          navigate("/customer");
-        }
+      // Navigate to appropriate dashboard
+      if (response.user.role === "admin") {
+        navigate("/admin");
       } else {
-        toast({
-          title: "Login Failed",
-          description: data.error || "Invalid credentials",
-          variant: "destructive"
-        });
+        navigate("/customer");
       }
+
     } catch (error) {
       console.error('Login error:', error);
       toast({
         title: "Login Failed",
-        description: "Unable to connect to server. Please try again.",
+        description: error instanceof Error ? error.message : "Unable to connect to server. Please try again.",
         variant: "destructive"
       });
     } finally {
