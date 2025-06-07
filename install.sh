@@ -205,10 +205,6 @@ INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status) VAL
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active'),
 ('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active'),
 ('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended');
-
--- Insert default admin user (password: admin123)
-INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
-('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
 EOF
 
     # Asterisk ODBC configuration
@@ -334,18 +330,60 @@ EOF
     fi
 
     print_status "Creating Asterisk database and user..."
+    
+    # Drop and recreate the asterisk user to ensure clean setup
     mysql -u root -p"${mysql_root_password}" <<EOF
+DROP USER IF EXISTS 'asterisk'@'localhost';
 CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
+CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
+    # Test the asterisk user connection
+    print_status "Testing asterisk user database connection..."
+    if mysql -u asterisk -p"${asterisk_db_password}" -e "USE asterisk; SELECT 1;" >/dev/null 2>&1; then
+        print_status "✓ Asterisk user database connection successful"
+    else
+        print_error "✗ Asterisk user database connection failed"
+        
+        # Try to fix potential issues
+        print_status "Attempting to fix database connection issues..."
+        mysql -u root -p"${mysql_root_password}" <<EOF
+DROP USER IF EXISTS 'asterisk'@'localhost';
+CREATE USER 'asterisk'@'localhost' IDENTIFIED WITH mysql_native_password BY '${asterisk_db_password}';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+        
+        # Test again
+        if mysql -u asterisk -p"${asterisk_db_password}" -e "USE asterisk; SELECT 1;" >/dev/null 2>&1; then
+            print_status "✓ Asterisk user database connection fixed"
+        else
+            print_error "✗ Failed to establish asterisk user database connection"
+            print_status "Database credentials that will be used:"
+            print_status "User: asterisk"
+            print_status "Password: ${asterisk_db_password}"
+            print_status "Database: asterisk"
+        fi
+    fi
+
     print_status "Creating database tables..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
     
+    # Create default admin user with proper password hash
+    print_status "Creating default admin user..."
+    # Generate bcrypt hash for admin123
+    ADMIN_HASH='$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'
+    mysql -u root -p"${mysql_root_password}" asterisk <<EOF
+INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
+('admin', '${ADMIN_HASH}', 'admin@ibilling.local', 'admin', 'active');
+EOF
+    
     print_status "Database setup completed successfully"
 }
+
+# ... keep existing code (all other functions remain the same)
 
 setup_odbc() {
     local asterisk_db_password=$1
@@ -611,6 +649,18 @@ EOF
     sudo systemctl enable ibilling-backend
     sudo systemctl start ibilling-backend
     
+    # Wait for service to start and test connection
+    sleep 5
+    
+    print_status "Testing backend service..."
+    if curl -s http://localhost:3001/health > /dev/null; then
+        print_status "✓ Backend API is responding"
+    else
+        print_warning "⚠ Backend service may need more time to start"
+        print_status "Checking service status..."
+        sudo systemctl status ibilling-backend --no-pager -l
+    fi
+    
     print_status "Backend API setup completed"
 }
 
@@ -665,6 +715,12 @@ display_installation_summary() {
     print_status "Database Credentials (SAVE THESE SECURELY):"
     echo "• MySQL Root Password: ${mysql_root_password}"
     echo "• Asterisk DB Password: ${asterisk_db_password}"
+    echo ""
+    print_status "Troubleshooting Commands:"
+    echo "• Check backend logs: sudo journalctl -u ibilling-backend -f"
+    echo "• Restart backend: sudo systemctl restart ibilling-backend"
+    echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM users;'"
+    echo "• Check backend API: curl http://localhost:3001/health"
     echo ""
     print_status "Next Steps:"
     echo "1. Test the web interface at http://your-server-ip"
