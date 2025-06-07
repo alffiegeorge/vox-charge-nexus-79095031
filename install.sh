@@ -34,6 +34,15 @@ check_and_setup_sudo() {
     fi
     
     print_warning "Current user ($USER) does not have sudo access"
+    
+    # Check if user is already in sudo group
+    if groups "$USER" | grep -q '\bsudo\b'; then
+        print_status "✓ User is already in sudo group, but sudo access not active"
+        print_warning "Please log out and log back in, or run 'newgrp sudo' to activate sudo access"
+        print_status "Then run this script again"
+        exit 0
+    fi
+    
     print_status "Adding user to sudo group..."
     
     # Ask for root password
@@ -41,14 +50,8 @@ check_and_setup_sudo() {
     read -s ROOT_PASSWORD
     echo ""
     
-    # Check if usermod is available, if not try to ensure passwd package is properly installed
-    if ! command -v usermod &> /dev/null; then
-        print_status "Ensuring usermod is available (updating passwd package)..."
-        echo "$ROOT_PASSWORD" | su -c "apt update && apt install -y --reinstall passwd" root
-    fi
-    
-    # Add user to sudo group
-    echo "$ROOT_PASSWORD" | su -c "usermod -aG sudo $USER" root
+    # Use su - to get proper root environment and run usermod
+    echo "$ROOT_PASSWORD" | su - root -c "usermod -aG sudo $USER"
     
     if [ $? -eq 0 ]; then
         print_status "✓ User $USER added to sudo group successfully"
