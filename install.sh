@@ -1,11 +1,8 @@
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
 # Exit on error
 set -e
-
-# ... keep existing code (colors, utility functions, check_and_setup_sudo function, main function start, create_config_files, setup_database functions)
 
 # Colors for output
 RED='\033[0;31m'
@@ -419,6 +416,14 @@ install_asterisk() {
     
     print_status "Installing Asterisk with ODBC support..."
     
+    # Ensure all required development packages are installed
+    print_status "Installing additional Asterisk build dependencies..."
+    sudo apt update
+    sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
+        libedit-dev libjansson-dev uuid-dev libsqlite3-dev libssl-dev \
+        libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
+        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev
+    
     # Check if we're already in an asterisk source directory
     ASTERISK_DIR=""
     if [ -d "/usr/src/asterisk-20"* ]; then
@@ -461,6 +466,13 @@ install_asterisk() {
         print_status "MP3 source already present"
     fi
 
+    # Clean previous build attempts if there were compilation errors
+    if [ -f "config.log" ] && grep -q "error" config.log; then
+        print_status "Cleaning previous build attempt due to errors..."
+        sudo make clean || true
+        sudo rm -f config.log menuselect.makeopts || true
+    fi
+
     # Configure Asterisk build if not already configured
     if [ ! -f "config.log" ]; then
         print_status "Configuring Asterisk build..."
@@ -485,11 +497,17 @@ install_asterisk() {
         print_status "Menuselect configuration already exists"
     fi
     
-    # Enable ODBC modules
+    # Enable ODBC modules and disable problematic modules
     print_status "Configuring required modules..."
     sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
     sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts 2>/dev/null || true
     sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
+    
+    # Disable res_config_curl if libcurl development headers are not available
+    if ! pkg-config --exists libcurl; then
+        print_warning "libcurl development headers not found, disabling res_config_curl"
+        sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl" | sudo tee -a menuselect.makeopts
+    fi
 
     # Build Asterisk if not already built
     if [ ! -f "main/asterisk" ]; then
@@ -498,8 +516,19 @@ install_asterisk() {
         if [ $? -ne 0 ]; then
             print_error "Asterisk build failed"
             print_error "This might be due to missing dependencies or compilation errors"
-            print_status "Check the output above for specific error messages"
-            exit 1
+            print_status "Trying to disable problematic modules and rebuild..."
+            
+            # Disable additional modules that might cause issues
+            sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl res_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl res_curl" | sudo tee -a menuselect.makeopts
+            
+            # Try building again
+            sudo make clean
+            sudo make -j$(nproc)
+            if [ $? -ne 0 ]; then
+                print_error "Asterisk build failed even after disabling problematic modules"
+                print_status "Check the output above for specific error messages"
+                exit 1
+            fi
         fi
     else
         print_status "Asterisk already built, skipping compilation"
