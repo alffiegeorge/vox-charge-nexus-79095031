@@ -1,8 +1,11 @@
-
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
 
 const DUMMY_LOGS = [
   { id: "LOG-001", user: "admin", action: "Customer Created", resource: "Customer C005", ip: "192.168.1.100", timestamp: "2024-01-05 14:32:15", status: "Success" },
@@ -13,6 +16,122 @@ const DUMMY_LOGS = [
 ];
 
 const AuditLogs = () => {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [actionFilter, setActionFilter] = useState("All Actions");
+  const [filteredLogs, setFilteredLogs] = useState(DUMMY_LOGS);
+  const [isRetentionDialogOpen, setIsRetentionDialogOpen] = useState(false);
+  const [retentionSettings, setRetentionSettings] = useState({
+    period: "90",
+    autoArchive: true,
+    compression: true
+  });
+
+  const handleSearch = () => {
+    console.log("Searching logs with term:", searchTerm);
+    let filtered = DUMMY_LOGS;
+    
+    if (searchTerm) {
+      filtered = filtered.filter(log => 
+        log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        log.resource.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        log.id.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (actionFilter !== "All Actions") {
+      const filterMap = {
+        "Login/Logout": ["Login Failed", "Logout"],
+        "Data Changes": ["Customer Created", "Rate Updated", "DID Assigned"],
+        "System Config": ["System Config"],
+        "Failed Actions": filtered.filter(log => log.status === "Failed")
+      };
+      
+      if (actionFilter === "Failed Actions") {
+        filtered = filtered.filter(log => log.status === "Failed");
+      } else if (filterMap[actionFilter]) {
+        filtered = filtered.filter(log => filterMap[actionFilter].includes(log.action));
+      }
+    }
+
+    setFilteredLogs(filtered);
+    toast({
+      title: "Search Applied",
+      description: `Found ${filtered.length} matching logs`,
+    });
+  };
+
+  const handleFilterByDate = () => {
+    console.log("Opening date filter dialog");
+    toast({
+      title: "Date Filter",
+      description: "Date range picker would open here",
+    });
+  };
+
+  const handleExportLogs = () => {
+    console.log("Exporting logs:", filteredLogs);
+    toast({
+      title: "Export Started",
+      description: "Audit logs are being exported to CSV format",
+    });
+    
+    // Simulate export
+    setTimeout(() => {
+      toast({
+        title: "Export Complete",
+        description: "Audit logs have been downloaded successfully",
+      });
+    }, 2000);
+  };
+
+  const handleBlockIP = (ip: string) => {
+    console.log("Blocking IP:", ip);
+    toast({
+      title: "IP Blocked",
+      description: `IP address ${ip} has been added to the blocklist`,
+    });
+  };
+
+  const handleReviewAlert = (alertType: string) => {
+    console.log("Reviewing alert:", alertType);
+    toast({
+      title: "Alert Under Review",
+      description: `${alertType} alert has been marked for review`,
+    });
+  };
+
+  const handleGenerateReport = (reportType: string) => {
+    console.log("Generating report:", reportType);
+    toast({
+      title: "Report Generation Started",
+      description: `${reportType} is being generated`,
+    });
+    
+    // Simulate report generation
+    setTimeout(() => {
+      toast({
+        title: "Report Ready",
+        description: `${reportType} has been generated and is ready for download`,
+      });
+    }, 3000);
+  };
+
+  const handleRetentionSave = () => {
+    console.log("Saving retention settings:", retentionSettings);
+    toast({
+      title: "Settings Saved",
+      description: "Data retention policies have been updated successfully",
+    });
+    setIsRetentionDialogOpen(false);
+  };
+
+  // Apply search when search term or filter changes
+  const applyFilters = () => {
+    handleSearch();
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -75,7 +194,13 @@ const AuditLogs = () => {
                 <div className="text-sm text-red-600">IP: 203.0.113.42 - 5 failed attempts in 10 minutes</div>
                 <div className="text-xs text-red-500">2024-01-05 14:25:00</div>
               </div>
-              <Button size="sm" variant="outline">Block IP</Button>
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => handleBlockIP("203.0.113.42")}
+              >
+                Block IP
+              </Button>
             </div>
             <div className="flex items-center justify-between p-3 border rounded bg-yellow-50">
               <div>
@@ -83,7 +208,13 @@ const AuditLogs = () => {
                 <div className="text-sm text-yellow-600">Bulk customer deletion by admin user</div>
                 <div className="text-xs text-yellow-500">2024-01-05 13:45:00</div>
               </div>
-              <Button size="sm" variant="outline">Review</Button>
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => handleReviewAlert("Unusual Admin Activity")}
+              >
+                Review
+              </Button>
             </div>
             <div className="flex items-center justify-between p-3 border rounded bg-green-50">
               <div>
@@ -104,51 +235,68 @@ const AuditLogs = () => {
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <div className="flex space-x-2">
-                <Input placeholder="Search logs..." className="max-w-sm" />
-                <select className="border rounded-md p-2">
+                <Input 
+                  placeholder="Search logs..." 
+                  className="max-w-sm" 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                />
+                <select 
+                  className="border rounded-md p-2"
+                  value={actionFilter}
+                  onChange={(e) => setActionFilter(e.target.value)}
+                >
                   <option>All Actions</option>
                   <option>Login/Logout</option>
                   <option>Data Changes</option>
                   <option>System Config</option>
                   <option>Failed Actions</option>
                 </select>
+                <Button variant="outline" onClick={applyFilters}>
+                  Apply Filters
+                </Button>
               </div>
               <div className="flex space-x-2">
-                <Button variant="outline">Filter by Date</Button>
-                <Button variant="outline">Export Logs</Button>
+                <Button variant="outline" onClick={handleFilterByDate}>
+                  Filter by Date
+                </Button>
+                <Button variant="outline" onClick={handleExportLogs}>
+                  Export Logs
+                </Button>
               </div>
             </div>
             <div className="border rounded-lg">
-              <table className="w-full">
-                <thead className="border-b bg-gray-50">
-                  <tr>
-                    <th className="text-left p-4">Log ID</th>
-                    <th className="text-left p-4">User</th>
-                    <th className="text-left p-4">Action</th>
-                    <th className="text-left p-4">Resource</th>
-                    <th className="text-left p-4">IP Address</th>
-                    <th className="text-left p-4">Timestamp</th>
-                    <th className="text-left p-4">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {DUMMY_LOGS.map((log, index) => (
-                    <tr key={index} className="border-b hover:bg-gray-50">
-                      <td className="p-4 font-mono text-sm">{log.id}</td>
-                      <td className="p-4">{log.user}</td>
-                      <td className="p-4">{log.action}</td>
-                      <td className="p-4">{log.resource}</td>
-                      <td className="p-4 font-mono">{log.ip}</td>
-                      <td className="p-4">{log.timestamp}</td>
-                      <td className="p-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Log ID</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>IP Address</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredLogs.map((log, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-mono text-sm">{log.id}</TableCell>
+                      <TableCell>{log.user}</TableCell>
+                      <TableCell>{log.action}</TableCell>
+                      <TableCell>{log.resource}</TableCell>
+                      <TableCell className="font-mono">{log.ip}</TableCell>
+                      <TableCell>{log.timestamp}</TableCell>
+                      <TableCell>
                         <Badge variant={log.status === "Success" ? "default" : "destructive"}>
                           {log.status}
                         </Badge>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </div>
         </CardContent>
@@ -161,16 +309,32 @@ const AuditLogs = () => {
             <CardDescription>Generate compliance and audit reports</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleGenerateReport("SOX Compliance Report")}
+            >
               Generate SOX Compliance Report
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleGenerateReport("GDPR Activity Report")}
+            >
               Generate GDPR Activity Report
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleGenerateReport("Security Audit Report")}
+            >
               Generate Security Audit Report
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleGenerateReport("User Activity Report")}
+            >
               Generate User Activity Report
             </Button>
           </CardContent>
@@ -188,17 +352,80 @@ const AuditLogs = () => {
             </div>
             <div className="flex justify-between">
               <span>Retention Period</span>
-              <span className="font-bold">90 days</span>
+              <span className="font-bold">{retentionSettings.period} days</span>
             </div>
             <div className="flex justify-between">
               <span>Auto Archive</span>
-              <span className="font-bold text-green-600">Enabled</span>
+              <span className={`font-bold ${retentionSettings.autoArchive ? 'text-green-600' : 'text-red-600'}`}>
+                {retentionSettings.autoArchive ? 'Enabled' : 'Disabled'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Compression</span>
-              <span className="font-bold text-green-600">Enabled</span>
+              <span className={`font-bold ${retentionSettings.compression ? 'text-green-600' : 'text-red-600'}`}>
+                {retentionSettings.compression ? 'Enabled' : 'Disabled'}
+              </span>
             </div>
-            <Button variant="outline" className="w-full">Configure Retention</Button>
+            
+            <AlertDialog open={isRetentionDialogOpen} onOpenChange={setIsRetentionDialogOpen}>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" className="w-full">
+                  Configure Retention
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Configure Retention Settings</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Adjust data retention policies for audit logs
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4 py-4">
+                  <div>
+                    <label className="text-sm font-medium">Retention Period (days)</label>
+                    <Input
+                      type="number"
+                      value={retentionSettings.period}
+                      onChange={(e) => setRetentionSettings(prev => ({
+                        ...prev,
+                        period: e.target.value
+                      }))}
+                      placeholder="90"
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="autoArchive"
+                      checked={retentionSettings.autoArchive}
+                      onChange={(e) => setRetentionSettings(prev => ({
+                        ...prev,
+                        autoArchive: e.target.checked
+                      }))}
+                    />
+                    <label htmlFor="autoArchive" className="text-sm">Enable Auto Archive</label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="compression"
+                      checked={retentionSettings.compression}
+                      onChange={(e) => setRetentionSettings(prev => ({
+                        ...prev,
+                        compression: e.target.checked
+                      }))}
+                    />
+                    <label htmlFor="compression" className="text-sm">Enable Compression</label>
+                  </div>
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleRetentionSave}>
+                    Save Settings
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       </div>
