@@ -3,7 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Download, Eye } from "lucide-react";
+import { Download, Eye, Search } from "lucide-react";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 const DUMMY_CUSTOMER_INVOICES = [
   { id: "INV-2024-001", amount: "$245.50", date: "2024-01-01", due: "2024-01-31", status: "Paid", period: "December 2023" },
@@ -13,6 +15,49 @@ const DUMMY_CUSTOMER_INVOICES = [
 ];
 
 const CustomerInvoices = () => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const { toast } = useToast();
+  
+  const filteredInvoices = DUMMY_CUSTOMER_INVOICES.filter(invoice =>
+    invoice.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    invoice.period.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    invoice.status.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleViewInvoice = (invoiceId: string) => {
+    toast({
+      title: "Invoice Viewer",
+      description: `Opening invoice ${invoiceId} in a new window...`,
+    });
+    console.log("Viewing invoice:", invoiceId);
+    // In a real app, this would open a PDF viewer or navigate to invoice details
+  };
+
+  const handleDownloadInvoice = (invoiceId: string) => {
+    toast({
+      title: "Download Started",
+      description: `Invoice ${invoiceId} is being downloaded...`,
+    });
+    console.log("Downloading invoice:", invoiceId);
+    // In a real app, this would trigger a file download
+  };
+
+  const handleDownloadAll = () => {
+    toast({
+      title: "Bulk Download Started",
+      description: `Preparing to download ${filteredInvoices.length} invoices...`,
+    });
+    console.log("Downloading all invoices:", filteredInvoices);
+    // In a real app, this would create a ZIP file with all invoices
+  };
+
+  const handleSearch = () => {
+    toast({
+      title: "Search Applied",
+      description: `Found ${filteredInvoices.length} invoices matching "${searchTerm}"`,
+    });
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -59,9 +104,22 @@ const CustomerInvoices = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <Input placeholder="Search invoices..." className="max-w-sm" />
-              <Button variant="outline">Download All</Button>
+            <div className="flex justify-between items-center gap-4">
+              <div className="flex items-center space-x-2 max-w-sm flex-1">
+                <Input 
+                  placeholder="Search invoices..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                />
+                <Button variant="outline" size="sm" onClick={handleSearch}>
+                  <Search className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button variant="outline" onClick={handleDownloadAll}>
+                <Download className="h-4 w-4 mr-2" />
+                Download All ({filteredInvoices.length})
+              </Button>
             </div>
             <div className="border rounded-lg">
               <table className="w-full">
@@ -76,31 +134,49 @@ const CustomerInvoices = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_CUSTOMER_INVOICES.map((invoice, index) => (
-                    <tr key={index} className="border-b">
-                      <td className="p-4 font-mono">{invoice.id}</td>
-                      <td className="p-4">{invoice.period}</td>
-                      <td className="p-4 font-semibold">{invoice.amount}</td>
-                      <td className="p-4">{invoice.due}</td>
-                      <td className="p-4">
-                        <Badge variant={
-                          invoice.status === "Paid" ? "default" : "secondary"
-                        }>
-                          {invoice.status}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex space-x-2">
-                          <Button variant="outline" size="sm">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </div>
+                  {filteredInvoices.length > 0 ? (
+                    filteredInvoices.map((invoice, index) => (
+                      <tr key={index} className="border-b hover:bg-gray-50">
+                        <td className="p-4 font-mono">{invoice.id}</td>
+                        <td className="p-4">{invoice.period}</td>
+                        <td className="p-4 font-semibold">{invoice.amount}</td>
+                        <td className="p-4">{invoice.due}</td>
+                        <td className="p-4">
+                          <Badge variant={
+                            invoice.status === "Paid" ? "default" : "secondary"
+                          }>
+                            {invoice.status}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex space-x-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleViewInvoice(invoice.id)}
+                              title="View Invoice"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleDownloadInvoice(invoice.id)}
+                              title="Download Invoice"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-gray-500">
+                        No invoices found matching "{searchTerm}"
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
