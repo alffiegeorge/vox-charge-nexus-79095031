@@ -388,8 +388,6 @@ EOF
     print_status "Database setup completed successfully"
 }
 
-# ... keep existing code (setup_odbc, install_asterisk, setup_web, perform_system_checks, display_installation_summary functions)
-
 # Setup ODBC
 setup_odbc() {
     local asterisk_db_password=$1
@@ -414,25 +412,90 @@ setup_odbc() {
     print_status "ODBC configuration completed"
 }
 
-# Install Asterisk
+# Install Asterisk with improved error handling
 install_asterisk() {
     local asterisk_db_password=$1
     
     print_status "Installing Asterisk with ODBC support..."
-    cd /usr/src
-    sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
-    sudo tar xzf asterisk-20-current.tar.gz
-    cd asterisk-20*/
+    
+    # Check if already in the source directory
+    if [ ! -d "/usr/src/asterisk-20"* ]; then
+        cd /usr/src
+        
+        # Download and extract Asterisk if not already done
+        if [ ! -f "asterisk-20-current.tar.gz" ]; then
+            print_status "Downloading Asterisk..."
+            sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
+        fi
+        
+        if [ ! -d "asterisk-20"* ]; then
+            print_status "Extracting Asterisk..."
+            sudo tar xzf asterisk-20-current.tar.gz
+        fi
+        
+        cd asterisk-20*/
+    else
+        cd /usr/src/asterisk-20*/
+        print_status "Using existing Asterisk source directory..."
+    fi
+
+    # Get MP3 source if needed
+    print_status "Getting MP3 source..."
+    if [ ! -f "addons/mp3/mpg123.h" ]; then
+        sudo contrib/scripts/get_mp3_source.sh
+    else
+        print_status "MP3 source already present"
+    fi
 
     # Configure Asterisk build
-    sudo contrib/scripts/get_mp3_source.sh
-    sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
+    print_status "Configuring Asterisk build..."
+    if [ ! -f "config.log" ]; then
+        sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
+        if [ $? -ne 0 ]; then
+            print_error "Asterisk configure failed"
+            exit 1
+        fi
+    else
+        print_status "Asterisk already configured"
+    fi
 
-    # Build and install
-    sudo make -j$(nproc)
+    # Enable required modules
+    print_status "Configuring Asterisk modules..."
+    if [ ! -f "menuselect.makeopts" ]; then
+        sudo make menuselect.makeopts
+    fi
+    
+    # Enable ODBC modules
+    sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts || true
+    sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts || true
+    sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts || true
+
+    # Build Asterisk
+    print_status "Building Asterisk (this may take 10-20 minutes)..."
+    if [ ! -f "main/asterisk" ]; then
+        sudo make -j$(nproc)
+        if [ $? -ne 0 ]; then
+            print_error "Asterisk build failed"
+            exit 1
+        fi
+    else
+        print_status "Asterisk already built"
+    fi
+
+    # Install Asterisk
+    print_status "Installing Asterisk..."
     sudo make install
-    sudo make samples
-    sudo make config
+    if [ $? -ne 0 ]; then
+        print_error "Asterisk installation failed"
+        exit 1
+    fi
+
+    # Install sample configs and init scripts
+    if [ ! -f "/etc/asterisk/asterisk.conf" ]; then
+        sudo make samples
+        sudo make config
+    fi
+    
     sudo ldconfig
 
     # Create asterisk user and group if they don't exist
@@ -443,7 +506,7 @@ install_asterisk() {
         sudo usermod -aG audio,dialout asterisk
     fi
 
-    # Now set proper ownership for asterisk directories
+    # Set proper ownership for asterisk directories
     print_status "Setting proper ownership for Asterisk directories..."
     sudo chown -R asterisk:asterisk /var/lib/asterisk
     sudo chown -R asterisk:asterisk /var/log/asterisk
