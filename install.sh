@@ -1,7 +1,6 @@
-
 #!/bin/bash
 
-# VoiceFlow Billing System Installation Script for Debian 12
+# iBilling - Professional Voice Billing System Installation Script for Debian 12
 # Exit on error
 set -e
 
@@ -30,7 +29,7 @@ if [[ $EUID -eq 0 ]]; then
    exit 1
 fi
 
-print_status "Starting VoiceFlow Billing System installation on Debian 12..."
+print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
 # 1. Create directory structure
 print_status "Creating directory structure..."
@@ -460,8 +459,8 @@ CREATE TABLE IF NOT EXISTS support_tickets (
 
 -- Insert default system settings
 INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, category, description) VALUES
-('company_name', 'VoiceFlow Communications', 'string', 'general', 'Company name displayed in the system'),
-('system_email', 'admin@voiceflow.com', 'string', 'general', 'System email address for notifications'),
+('company_name', 'iBilling Communications', 'string', 'general', 'Company name displayed in the system'),
+('system_email', 'admin@ibilling.com', 'string', 'general', 'System email address for notifications'),
 ('currency', 'VUV', 'string', 'general', 'Default currency for billing'),
 ('timezone', 'Pacific/Efate', 'string', 'general', 'System timezone'),
 ('minimum_credit', '5.00', 'number', 'billing', 'Minimum credit required'),
@@ -492,7 +491,7 @@ INSERT IGNORE INTO rates (destination_prefix, destination_name, rate_per_minute,
 
 -- Create default admin user (password: admin123)
 INSERT IGNORE INTO admin_users (username, email, password_hash, salt, full_name, role, status) VALUES
-('admin', 'admin@voiceflow.com', 'hash_placeholder', 'salt_placeholder', 'System Administrator', 'Super Admin', 'Active');
+('admin', 'admin@ibilling.com', 'hash_placeholder', 'salt_placeholder', 'System Administrator', 'Super Admin', 'Active');
 
 EOF
 
@@ -598,7 +597,7 @@ print_status "Node.js version: $node_version"
 print_status "npm version: $npm_version"
 
 # 11. Clone and setup the frontend
-print_status "Setting up VoiceFlow frontend..."
+print_status "Setting up iBilling frontend..."
 cd /opt/billing/web
 
 # Remove existing files if any
@@ -618,7 +617,7 @@ npm run build
 
 # 12. Configure Nginx
 print_status "Configuring Nginx..."
-sudo tee /etc/nginx/sites-available/voiceflow-billing > /dev/null <<EOF
+sudo tee /etc/nginx/sites-available/ibilling > /dev/null <<EOF
 server {
     listen 80;
     server_name localhost;
@@ -644,7 +643,7 @@ server {
 EOF
 
 # Enable the site
-sudo ln -sf /etc/nginx/sites-available/voiceflow-billing /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test and restart Nginx
@@ -714,7 +713,7 @@ fi
 
 # 16. Display installation summary
 print_status "============================================="
-print_status "VoiceFlow Billing System Installation Complete!"
+print_status "iBilling - Professional Voice Billing System Installation Complete!"
 print_status "============================================="
 echo ""
 print_status "System Information:"
