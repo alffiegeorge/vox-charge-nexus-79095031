@@ -278,6 +278,205 @@ CREATE TABLE IF NOT EXISTS did_numbers (
     INDEX status_idx (status)
 );
 
+-- System Settings table
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    setting_key VARCHAR(100) NOT NULL UNIQUE,
+    setting_value TEXT DEFAULT NULL,
+    setting_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+    category VARCHAR(50) DEFAULT 'general',
+    description TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX category_idx (category)
+);
+
+-- Admin Users table
+CREATE TABLE IF NOT EXISTS admin_users (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    salt VARCHAR(32) NOT NULL,
+    full_name VARCHAR(100) DEFAULT NULL,
+    role ENUM('Super Admin', 'Admin', 'Operator', 'Support') DEFAULT 'Operator',
+    status ENUM('Active', 'Suspended', 'Locked') DEFAULT 'Active',
+    last_login TIMESTAMP NULL,
+    login_attempts INT DEFAULT 0,
+    locked_until TIMESTAMP NULL,
+    two_factor_enabled BOOLEAN DEFAULT FALSE,
+    two_factor_secret VARCHAR(32) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Audit Logs table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT(11) DEFAULT NULL,
+    user_type ENUM('admin', 'customer') DEFAULT 'admin',
+    action VARCHAR(100) NOT NULL,
+    table_name VARCHAR(50) DEFAULT NULL,
+    record_id VARCHAR(50) DEFAULT NULL,
+    old_values JSON DEFAULT NULL,
+    new_values JSON DEFAULT NULL,
+    ip_address VARCHAR(45) DEFAULT NULL,
+    user_agent TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX user_idx (user_id, user_type),
+    INDEX action_idx (action),
+    INDEX created_at_idx (created_at)
+);
+
+-- Invoices table
+CREATE TABLE IF NOT EXISTS invoices (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) NOT NULL,
+    invoice_date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled') DEFAULT 'Draft',
+    payment_date DATE DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    INDEX customer_idx (customer_id),
+    INDEX status_idx (status),
+    INDEX date_idx (invoice_date)
+);
+
+-- Invoice Items table
+CREATE TABLE IF NOT EXISTS invoice_items (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT(11) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    quantity DECIMAL(10,3) NOT NULL DEFAULT 1.000,
+    unit_price DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+    total_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    item_type ENUM('Call', 'SMS', 'DID', 'Service', 'Other') DEFAULT 'Other',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+    INDEX invoice_idx (invoice_id)
+);
+
+-- Payments table
+CREATE TABLE IF NOT EXISTS payments (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(20) NOT NULL,
+    invoice_id INT(11) DEFAULT NULL,
+    payment_method ENUM('Cash', 'Bank Transfer', 'Credit Card', 'Mobile Money', 'Crypto') NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    currency VARCHAR(3) DEFAULT 'VUV',
+    reference_number VARCHAR(100) DEFAULT NULL,
+    transaction_id VARCHAR(100) DEFAULT NULL,
+    status ENUM('Pending', 'Completed', 'Failed', 'Refunded') DEFAULT 'Pending',
+    payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    INDEX customer_idx (customer_id),
+    INDEX status_idx (status),
+    INDEX payment_date_idx (payment_date)
+);
+
+-- Trunks table
+CREATE TABLE IF NOT EXISTS trunks (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    type ENUM('SIP', 'IAX2', 'DAHDI', 'PRI') DEFAULT 'SIP',
+    host VARCHAR(100) NOT NULL,
+    port INT DEFAULT 5060,
+    username VARCHAR(50) DEFAULT NULL,
+    password VARCHAR(100) DEFAULT NULL,
+    context VARCHAR(50) DEFAULT 'from-trunk',
+    codec_priority VARCHAR(100) DEFAULT 'ulaw,alaw,gsm',
+    max_channels INT DEFAULT 30,
+    status ENUM('Active', 'Inactive', 'Maintenance') DEFAULT 'Active',
+    cost_per_minute DECIMAL(8,4) DEFAULT 0.0000,
+    provider VARCHAR(100) DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Routes table
+CREATE TABLE IF NOT EXISTS routes (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    pattern VARCHAR(50) NOT NULL,
+    trunk_id INT(11) NOT NULL,
+    priority INT DEFAULT 1,
+    status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    time_restrictions JSON DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trunk_id) REFERENCES trunks(id) ON DELETE CASCADE,
+    INDEX pattern_idx (pattern),
+    INDEX priority_idx (priority)
+);
+
+-- SMS Messages table
+CREATE TABLE IF NOT EXISTS sms_messages (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    from_number VARCHAR(20) NOT NULL,
+    to_number VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    direction ENUM('Inbound', 'Outbound') NOT NULL,
+    status ENUM('Pending', 'Sent', 'Delivered', 'Failed') DEFAULT 'Pending',
+    cost DECIMAL(8,4) DEFAULT 0.0000,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TIMESTAMP NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    INDEX customer_idx (customer_id),
+    INDEX direction_idx (direction),
+    INDEX sent_at_idx (sent_at)
+);
+
+-- Support Tickets table
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    ticket_number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    subject VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    priority ENUM('Low', 'Medium', 'High', 'Critical') DEFAULT 'Medium',
+    status ENUM('Open', 'In Progress', 'Resolved', 'Closed') DEFAULT 'Open',
+    assigned_to INT(11) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (assigned_to) REFERENCES admin_users(id) ON DELETE SET NULL,
+    INDEX customer_idx (customer_id),
+    INDEX status_idx (status),
+    INDEX priority_idx (priority)
+);
+
+-- Insert default system settings
+INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, category, description) VALUES
+('company_name', 'VoiceFlow Communications', 'string', 'general', 'Company name displayed in the system'),
+('system_email', 'admin@voiceflow.com', 'string', 'general', 'System email address for notifications'),
+('currency', 'VUV', 'string', 'general', 'Default currency for billing'),
+('timezone', 'Pacific/Efate', 'string', 'general', 'System timezone'),
+('minimum_credit', '5.00', 'number', 'billing', 'Minimum credit required'),
+('low_balance_warning', '10.00', 'number', 'billing', 'Low balance warning threshold'),
+('auto_suspend', 'false', 'boolean', 'billing', 'Auto-suspend accounts on zero balance'),
+('email_notifications', 'true', 'boolean', 'billing', 'Enable email notifications'),
+('asterisk_server_ip', '192.168.1.100', 'string', 'asterisk', 'Asterisk server IP address'),
+('ami_port', '5038', 'string', 'asterisk', 'Asterisk AMI port'),
+('ami_username', 'admin', 'string', 'asterisk', 'Asterisk AMI username'),
+('session_timeout', '30', 'number', 'security', 'Session timeout in minutes'),
+('force_password_change', 'false', 'boolean', 'security', 'Force password change on first login'),
+('two_factor_auth', 'false', 'boolean', 'security', 'Enable two-factor authentication'),
+('login_attempt_limit', 'true', 'boolean', 'security', 'Enable login attempt limiting'),
+('max_login_attempts', '5', 'number', 'security', 'Maximum login attempts before lockout');
+
 -- Insert sample data
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
@@ -290,6 +489,10 @@ INSERT IGNORE INTO rates (destination_prefix, destination_name, rate_per_minute,
 ('49', 'Germany', 0.0280, 60),
 ('33', 'France', 0.0240, 60),
 ('91', 'India', 0.0180, 60);
+
+-- Create default admin user (password: admin123)
+INSERT IGNORE INTO admin_users (username, email, password_hash, salt, full_name, role, status) VALUES
+('admin', 'admin@voiceflow.com', 'hash_placeholder', 'salt_placeholder', 'System Administrator', 'Super Admin', 'Active');
 
 EOF
 
