@@ -80,7 +80,7 @@ async function createUsersTable() {
     if (existingAdmin[0].count === 0) {
       console.log('Creating default admin user...');
       const hashedPassword = await bcrypt.hash('admin123', 10);
-      console.log('Admin password hash generated:', hashedPassword);
+      console.log('Admin password hash generated successfully');
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
@@ -97,7 +97,7 @@ async function createUsersTable() {
     if (existingCustomer[0].count === 0) {
       console.log('Creating default customer user...');
       const hashedPassword = await bcrypt.hash('customer123', 10);
-      console.log('Customer password hash generated:', hashedPassword);
+      console.log('Customer password hash generated successfully');
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']
@@ -148,86 +148,127 @@ app.get('/health', (req, res) => {
 
 // Authentication routes
 app.post('/auth/login', async (req, res) => {
+  console.log('\n=== LOGIN ATTEMPT START ===');
+  console.log('Request headers:', req.headers);
+  console.log('Request body:', req.body);
+  
   try {
     const { username, password } = req.body;
     
-    console.log('=== LOGIN ATTEMPT ===');
     console.log('Username:', username);
     console.log('Password provided:', password ? 'Yes' : 'No');
     console.log('Password length:', password ? password.length : 0);
-    console.log('Request body:', req.body);
 
+    // Input validation
     if (!username || !password) {
-      console.log('Missing username or password');
+      console.log('❌ Missing username or password');
       return res.status(400).json({ error: 'Username and password required' });
     }
 
+    // Database availability check
     if (!db) {
-      console.log('Database not available');
+      console.error('❌ Database not available');
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    // Check users table for authentication
+    console.log('✓ Database is available');
     console.log('Querying database for user:', username);
-    const [users] = await db.execute(
-      'SELECT id, username, password, email, role, status FROM users WHERE username = ?',
-      [username]
-    );
+    
+    // Database query with proper error handling
+    let users;
+    try {
+      [users] = await db.execute(
+        'SELECT id, username, password, email, role, status FROM users WHERE username = ?',
+        [username]
+      );
+      console.log('✓ Database query successful');
+      console.log('Query result count:', users.length);
+    } catch (dbError) {
+      console.error('❌ Database query failed:', dbError);
+      return res.status(500).json({ error: 'Database query failed' });
+    }
 
-    console.log('Database query result count:', users.length);
-    if (users.length > 0) {
-      const user = users[0];
-      console.log('User found:');
-      console.log('- ID:', user.id);
-      console.log('- Username:', user.username);
-      console.log('- Role:', user.role);
-      console.log('- Status:', user.status);
-      console.log('- Email:', user.email);
-      console.log('- Stored password hash:', user.password);
-      
-      if (user.status !== 'active') {
-        console.log('User account is not active:', user.status);
-        return res.status(401).json({ error: 'Account is not active' });
-      }
-      
-      console.log('Comparing passwords...');
-      console.log('Input password:', password);
-      console.log('Stored hash:', user.password);
-      
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      console.log('Password comparison result:', isValidPassword);
+    if (users.length === 0) {
+      console.log('❌ No user found with username:', username);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
-      if (!isValidPassword) {
-        console.log('Password comparison failed');
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
+    const user = users[0];
+    console.log('✓ User found:');
+    console.log('- ID:', user.id);
+    console.log('- Username:', user.username);
+    console.log('- Role:', user.role);
+    console.log('- Status:', user.status);
+    console.log('- Email:', user.email);
+    
+    // Status check
+    if (user.status !== 'active') {
+      console.log('❌ User account is not active:', user.status);
+      return res.status(401).json({ error: 'Account is not active' });
+    }
+    
+    console.log('✓ User account is active');
+    console.log('Comparing passwords...');
+    console.log('Input password:', password);
+    console.log('Stored hash exists:', user.password ? 'Yes' : 'No');
+    
+    // Password comparison with error handling
+    let isValidPassword;
+    try {
+      isValidPassword = await bcrypt.compare(password, user.password);
+      console.log('✓ Password comparison completed');
+      console.log('Password valid:', isValidPassword);
+    } catch (bcryptError) {
+      console.error('❌ Password comparison failed:', bcryptError);
+      return res.status(500).json({ error: 'Password verification failed' });
+    }
 
-      console.log('Login successful for user:', username);
+    if (!isValidPassword) {
+      console.log('❌ Password comparison failed - invalid credentials');
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
-      const token = jwt.sign(
+    console.log('✅ Login successful for user:', username);
+
+    // Token generation with error handling
+    let token;
+    try {
+      token = jwt.sign(
         { id: user.id, username: user.username, role: user.role },
         process.env.JWT_SECRET || 'your-secret-key',
         { expiresIn: '24h' }
       );
-
-      res.json({
-        token,
-        user: {
-          id: user.id,
-          username: user.username,
-          role: user.role,
-          email: user.email
-        }
-      });
-    } else {
-      console.log('No user found with username:', username);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      console.log('✓ JWT token generated successfully');
+    } catch (jwtError) {
+      console.error('❌ JWT token generation failed:', jwtError);
+      return res.status(500).json({ error: 'Token generation failed' });
     }
 
+    const response = {
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        email: user.email
+      }
+    };
+
+    console.log('✅ Sending successful response');
+    console.log('=== LOGIN ATTEMPT END ===\n');
+    
+    res.json(response);
+
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('\n❌ UNEXPECTED LOGIN ERROR:');
+    console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('=== LOGIN ATTEMPT END (ERROR) ===\n');
+    
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
