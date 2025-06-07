@@ -1,6 +1,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 const DUMMY_RECENT_CALLS = [
   { number: "+1-555-0123", duration: "5:23", cost: "$0.11", time: "2 hours ago", destination: "New York" },
@@ -17,6 +19,39 @@ const DUMMY_DIDS = [
 ];
 
 const CustomerDashboard = () => {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const handleAddCredit = () => {
+    toast({
+      title: "Add Credit",
+      description: "Redirecting to payment gateway...",
+    });
+    
+    // Simulate payment process
+    setTimeout(() => {
+      toast({
+        title: "Credit Added Successfully",
+        description: "Your account has been credited with $50.00",
+      });
+    }, 2000);
+  };
+
+  const handleViewAllCalls = () => {
+    navigate("/customer/calls");
+    toast({
+      title: "Navigating",
+      description: "Loading call history...",
+    });
+  };
+
+  const handleViewAllDIDs = () => {
+    toast({
+      title: "View All DIDs",
+      description: "Showing complete list of your phone numbers",
+    });
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -31,7 +66,12 @@ const CustomerDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-green-600">$125.50</div>
-            <Button className="w-full mt-4 bg-blue-600 hover:bg-blue-700">Add Credit</Button>
+            <Button 
+              className="w-full mt-4 bg-blue-600 hover:bg-blue-700"
+              onClick={handleAddCredit}
+            >
+              Add Credit
+            </Button>
           </CardContent>
         </Card>
 
@@ -77,6 +117,13 @@ const CustomerDashboard = () => {
                 </div>
               ))}
             </div>
+            <Button 
+              variant="outline" 
+              className="w-full mt-4"
+              onClick={handleViewAllCalls}
+            >
+              View All Calls
+            </Button>
           </CardContent>
         </Card>
 
@@ -99,6 +146,13 @@ const CustomerDashboard = () => {
                 </div>
               ))}
             </div>
+            <Button 
+              variant="outline" 
+              className="w-full mt-4"
+              onClick={handleViewAllDIDs}
+            >
+              Manage DIDs
+            </Button>
           </CardContent>
         </Card>
       </div>
