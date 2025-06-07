@@ -35,31 +35,30 @@ check_and_setup_sudo() {
     
     print_warning "Current user ($USER) does not have sudo access"
     
-    # Check if user is already in sudo group
+    # Even if user is in sudo group, if sudo doesn't work, we need to fix it
     if groups "$USER" | grep -q '\bsudo\b'; then
-        print_status "✓ User is already in sudo group, but sudo access not active"
-        print_warning "Please log out and log back in, or run 'newgrp sudo' to activate sudo access"
-        print_status "Then run this script again"
-        exit 0
+        print_warning "User is in sudo group but sudo access is not working properly"
+        print_status "This can happen after adding user to sudo group. We'll refresh the group membership."
+    else
+        print_status "User is not in sudo group. Adding user to sudo group..."
     fi
     
-    print_status "Adding user to sudo group..."
-    
     # Ask for root password
-    echo -n "Please enter root password to add $USER to sudo group: "
+    echo -n "Please enter root password to fix sudo access for $USER: "
     read -s ROOT_PASSWORD
     echo ""
     
-    # Use su - to get proper root environment and run usermod
+    # Use su - to get proper root environment and run usermod (even if user might already be in group)
     echo "$ROOT_PASSWORD" | su - root -c "usermod -aG sudo $USER"
     
     if [ $? -eq 0 ]; then
-        print_status "✓ User $USER added to sudo group successfully"
-        print_warning "Please log out and log back in, or run 'newgrp sudo' to activate sudo access"
-        print_status "Then run this script again"
+        print_status "✓ User $USER sudo access configured successfully"
+        print_warning "Please run 'newgrp sudo' to activate sudo access in current session"
+        print_status "Or log out and log back in, then run this script again"
+        print_status "Alternatively, you can continue in a new terminal session"
         exit 0
     else
-        print_error "Failed to add user to sudo group"
+        print_error "Failed to configure sudo access for user"
         exit 1
     fi
 }
