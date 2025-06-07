@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -35,30 +36,78 @@ check_and_setup_sudo() {
     
     print_warning "Current user ($USER) does not have sudo access"
     
-    # Even if user is in sudo group, if sudo doesn't work, we need to fix it
-    if groups "$USER" | grep -q '\bsudo\b'; then
-        print_warning "User is in sudo group but sudo access is not working properly"
-        print_status "This can happen after adding user to sudo group. We'll refresh the group membership."
-    else
-        print_status "User is not in sudo group. Adding user to sudo group..."
+    # Check if sudo is even installed
+    if ! command -v sudo >/dev/null 2>&1; then
+        print_error "sudo is not installed on this system"
+        print_status "Installing sudo package..."
+        su - root -c "apt update && apt install -y sudo"
     fi
     
-    # Ask for root password
-    echo -n "Please enter root password to fix sudo access for $USER: "
+    # Check if user is in sudo group
+    if groups "$USER" | grep -q '\bsudo\b'; then
+        print_warning "User is in sudo group but sudo access is not working"
+        print_status "This might be a sudo configuration issue"
+    else
+        print_status "User is not in sudo group"
+    fi
+    
+    # Ask for root password to fix sudo access
+    echo -n "Please enter root password to configure sudo access for $USER: "
     read -s ROOT_PASSWORD
     echo ""
     
-    # Use su - to get proper root environment and run usermod (even if user might already be in group)
-    echo "$ROOT_PASSWORD" | su - root -c "usermod -aG sudo $USER"
+    # Comprehensive sudo fix using root access
+    print_status "Configuring sudo access..."
     
-    if [ $? -eq 0 ]; then
-        print_status "✓ User $USER sudo access configured successfully"
-        print_warning "Please run 'newgrp sudo' to activate sudo access in current session"
-        print_status "Or log out and log back in, then run this script again"
-        print_status "Alternatively, you can continue in a new terminal session"
+    # Create a temporary script to run as root
+    cat > /tmp/fix_sudo.sh << 'SCRIPT_EOF'
+#!/bin/bash
+USER_TO_FIX="$1"
+
+# Ensure sudo group exists
+groupadd -f sudo
+
+# Add user to sudo group
+usermod -aG sudo "$USER_TO_FIX"
+
+# Ensure sudoers file is properly configured
+if ! grep -q "^%sudo" /etc/sudoers; then
+    echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
+fi
+
+# Verify sudoers syntax
+visudo -c
+
+# Check if user is now in sudo group
+if groups "$USER_TO_FIX" | grep -q '\bsudo\b'; then
+    echo "✓ User $USER_TO_FIX successfully added to sudo group"
+    exit 0
+else
+    echo "✗ Failed to add user $USER_TO_FIX to sudo group"
+    exit 1
+fi
+SCRIPT_EOF
+
+    chmod +x /tmp/fix_sudo.sh
+    
+    # Execute the fix script as root
+    if echo "$ROOT_PASSWORD" | su - root -c "/tmp/fix_sudo.sh $USER"; then
+        print_status "✓ Sudo access configured successfully"
+        
+        # Clean up
+        rm -f /tmp/fix_sudo.sh
+        
+        print_warning "IMPORTANT: You must start a NEW terminal session for sudo to work"
+        print_status "Options to activate sudo access:"
+        echo "  1. Run: exec su - $USER"
+        echo "  2. Or close this terminal and open a new SSH session"
+        echo "  3. Or run: newgrp sudo && exec bash"
+        echo ""
+        print_status "After starting a new session, run this script again"
         exit 0
     else
-        print_error "Failed to configure sudo access for user"
+        print_error "Failed to configure sudo access"
+        rm -f /tmp/fix_sudo.sh
         exit 1
     fi
 }
@@ -74,6 +123,8 @@ fi
 check_and_setup_sudo
 
 print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
+
+# ... keep existing code (generate_password function and all other functions remain the same)
 
 generate_password() {
     openssl rand -base64 32
@@ -238,6 +289,8 @@ server {
 }
 EOF
 }
+
+# ... keep existing code (all remaining functions stay exactly the same)
 
 # Setup database
 setup_database() {
