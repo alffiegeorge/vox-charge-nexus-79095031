@@ -1,0 +1,17 @@
+
+[Unit]
+Description=iBilling Backend API Server
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=ihs
+WorkingDirectory=/opt/billing/web/backend
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/billing/web/backend/.env
+
+[Install]
+WantedBy=multi-user.target
