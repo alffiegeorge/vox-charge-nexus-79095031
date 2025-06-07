@@ -29,7 +29,6 @@ import NumberPorting from "./pages/NumberPorting";
 import SupportTickets from "./pages/SupportTickets";
 import AuditLogs from "./pages/AuditLogs";
 import CustomerInvoices from "./pages/CustomerInvoices";
-import CustomerSMS from "./pages/CustomerSMS";
 
 const queryClient = new QueryClient();
 
@@ -65,7 +64,6 @@ const App = () => (
           <Route path="/customer/calls" element={<CustomerLayout><CustomerCallHistory /></CustomerLayout>} />
           <Route path="/customer/billing" element={<CustomerLayout><CustomerBilling /></CustomerLayout>} />
           <Route path="/customer/invoices" element={<CustomerLayout><CustomerInvoices /></CustomerLayout>} />
-          <Route path="/customer/sms" element={<CustomerLayout><CustomerSMS /></CustomerLayout>} />
           <Route path="/customer/settings" element={<CustomerLayout><CustomerSettings /></CustomerLayout>} />
           
           {/* Catch-all route */}

@@ -1,5 +1,4 @@
-
-import { Phone, BarChart3, CreditCard, Settings, LogOut, MessageSquare, FileText } from "lucide-react";
+import { Phone, BarChart3, CreditCard, Settings, LogOut, FileText } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 interface CustomerLayoutProps {
@@ -14,7 +13,6 @@ const CustomerLayout = ({ children }: CustomerLayoutProps) => {
     { icon: Phone, label: "Call History", path: "/customer/calls" },
     { icon: CreditCard, label: "Billing", path: "/customer/billing" },
     { icon: FileText, label: "Invoices", path: "/customer/invoices" },
-    { icon: MessageSquare, label: "SMS", path: "/customer/sms" },
     { icon: Settings, label: "Settings", path: "/customer/settings" }
   ];
 
