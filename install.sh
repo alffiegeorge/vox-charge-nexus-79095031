@@ -1,4 +1,5 @@
 
+
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -147,9 +148,17 @@ create_directory() {
     
     sudo mkdir -p "$dir_path"
     if [ "$owner" != "root:root" ]; then
-        sudo chown -R "$owner" "$dir_path"
+        # Check if the user exists before trying to set ownership
+        local user_name=$(echo "$owner" | cut -d: -f1)
+        if id "$user_name" >/dev/null 2>&1; then
+            sudo chown -R "$owner" "$dir_path"
+            print_status "Created directory: $dir_path (owner: $owner)"
+        else
+            print_status "Created directory: $dir_path (will set ownership later when $user_name user exists)"
+        fi
+    else
+        print_status "Created directory: $dir_path"
     fi
-    print_status "Created directory: $dir_path"
 }
 
 backup_file() {
@@ -372,6 +381,21 @@ install_asterisk() {
     sudo make samples
     sudo make config
     sudo ldconfig
+
+    # Create asterisk user and group if they don't exist
+    if ! id asterisk >/dev/null 2>&1; then
+        print_status "Creating asterisk user and group..."
+        sudo groupadd -r asterisk
+        sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
+        sudo usermod -aG audio,dialout asterisk
+    fi
+
+    # Now set proper ownership for asterisk directories
+    print_status "Setting proper ownership for Asterisk directories..."
+    sudo chown -R asterisk:asterisk /var/lib/asterisk
+    sudo chown -R asterisk:asterisk /var/log/asterisk
+    sudo chown -R asterisk:asterisk /var/spool/asterisk
+    sudo chown -R asterisk:asterisk /etc/asterisk
 
     # Configure Asterisk for ODBC
     print_status "Configuring Asterisk..."
