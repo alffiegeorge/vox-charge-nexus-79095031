@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -42,10 +41,10 @@ check_and_setup_sudo() {
     read -s ROOT_PASSWORD
     echo ""
     
-    # Check if usermod is available, install if needed
+    # Check if usermod is available, if not try to ensure passwd package is properly installed
     if ! command -v usermod &> /dev/null; then
-        print_status "Installing shadow-utils package (contains usermod)..."
-        echo "$ROOT_PASSWORD" | su -c "apt update && apt install -y shadow-utils" root
+        print_status "Ensuring usermod is available (updating passwd package)..."
+        echo "$ROOT_PASSWORD" | su -c "apt update && apt install -y --reinstall passwd" root
     fi
     
     # Add user to sudo group
