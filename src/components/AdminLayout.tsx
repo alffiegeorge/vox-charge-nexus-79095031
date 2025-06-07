@@ -10,7 +10,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
   const location = useLocation();
 
   const menuItems = [
-    { icon: BarChart3, label: "Dashboard", path: "/admin" },
+    { icon: BarChart3, label: "Dashboard", path: "/admin/dashboard" },
     { icon: Users, label: "Customers", path: "/admin/customers" },
     { icon: Phone, label: "DID Management", path: "/admin/dids" },
     { icon: Building2, label: "Trunks", path: "/admin/trunks" },
@@ -29,7 +29,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
   ];
 
   const handleLogout = () => {
-    window.location.href = "/";
+    window.location.href = "/admin";
   };
 
   return (

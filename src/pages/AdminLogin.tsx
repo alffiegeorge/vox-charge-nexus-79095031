@@ -4,12 +4,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Phone } from "lucide-react";
+import { Phone, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/api";
 
-const Index = () => {
+const AdminLogin = () => {
   const [loginData, setLoginData] = useState({ username: "", password: "" });
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -28,20 +28,20 @@ const Index = () => {
     setIsLoading(true);
 
     try {
-      console.log('Customer login attempt with:', { username: loginData.username });
+      console.log('Admin login attempt with:', { username: loginData.username });
       
       const response = await apiClient.login({
         username: loginData.username,
         password: loginData.password
       });
 
-      console.log('Customer login response:', response);
+      console.log('Admin login response:', response);
 
-      // Check if user is customer
-      if (response.user.role !== "customer") {
+      // Check if user is admin
+      if (response.user.role !== "admin") {
         toast({
           title: "Access Denied",
-          description: "This login is for customers only. Use /admin for administrator access.",
+          description: "This login is for administrators only",
           variant: "destructive"
         });
         return;
@@ -54,14 +54,14 @@ const Index = () => {
 
       toast({
         title: "Login Successful",
-        description: "Welcome Customer!"
+        description: "Welcome Administrator!"
       });
 
-      // Navigate to customer dashboard
-      navigate("/customer");
+      // Navigate to admin dashboard
+      navigate("/admin/dashboard");
 
     } catch (error) {
-      console.error('Customer login error:', error);
+      console.error('Admin login error:', error);
       toast({
         title: "Login Failed",
         description: error instanceof Error ? error.message : "Unable to connect to server. Please try again.",
@@ -73,36 +73,36 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Phone className="h-12 w-12 text-blue-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">iBilling</h1>
-          <p className="text-gray-600">Customer Portal</p>
+          <Shield className="h-12 w-12 text-red-600 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">iBilling Admin</h1>
+          <p className="text-gray-600">Administrator Portal</p>
         </div>
         
         <Card className="shadow-xl">
           <CardHeader>
-            <CardTitle>Customer Login</CardTitle>
-            <CardDescription>Enter your customer credentials to continue</CardDescription>
+            <CardTitle>Administrator Login</CardTitle>
+            <CardDescription>Enter your admin credentials to continue</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="admin-username">Username</Label>
               <Input
-                id="username"
-                placeholder="Enter your username"
+                id="admin-username"
+                placeholder="Enter admin username"
                 value={loginData.username}
                 onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
                 disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="admin-password">Password</Label>
               <Input
-                id="password"
+                id="admin-password"
                 type="password"
-                placeholder="Enter your password"
+                placeholder="Enter admin password"
                 value={loginData.password}
                 onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                 disabled={isLoading}
@@ -112,22 +112,18 @@ const Index = () => {
             
             {/* Demo credentials display */}
             <div className="bg-gray-50 p-3 rounded-lg text-sm">
-              <div className="font-semibold mb-2">Demo Customer Credentials:</div>
-              <div><strong>Username:</strong> customer</div>
-              <div><strong>Password:</strong> customer123</div>
+              <div className="font-semibold mb-2">Demo Admin Credentials:</div>
+              <div><strong>Username:</strong> admin</div>
+              <div><strong>Password:</strong> admin123</div>
             </div>
             
             <Button 
               onClick={handleLogin}
-              className="w-full bg-blue-600 hover:bg-blue-700"
+              className="w-full bg-red-600 hover:bg-red-700"
               disabled={isLoading}
             >
-              {isLoading ? "Logging in..." : "Customer Login"}
+              {isLoading ? "Logging in..." : "Admin Login"}
             </Button>
-            
-            <div className="text-center text-sm text-gray-600">
-              <p>Administrator? <a href="/admin" className="text-blue-600 hover:underline">Login here</a></p>
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -135,4 +131,4 @@ const Index = () => {
   );
 };
 
-export default Index;
+export default AdminLogin;

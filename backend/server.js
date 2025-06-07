@@ -73,15 +73,27 @@ async function createUsersTable() {
     `);
     
     // Check if admin user exists, if not create it
-    const [existingUsers] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin']);
+    const [existingAdmin] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin']);
     
-    if (existingUsers[0].count === 0) {
+    if (existingAdmin[0].count === 0) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
       );
       console.log('✓ Default admin user created with password: admin123');
+    }
+    
+    // Check if customer user exists, if not create it
+    const [existingCustomer] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['customer']);
+    
+    if (existingCustomer[0].count === 0) {
+      const hashedPassword = await bcrypt.hash('customer123', 10);
+      await db.execute(
+        'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
+        ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']
+      );
+      console.log('✓ Default customer user created with password: customer123');
     }
     
     console.log('✓ Users table ready');
