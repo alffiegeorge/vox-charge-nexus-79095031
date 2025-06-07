@@ -1,10 +1,12 @@
-
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 
 const DUMMY_TICKETS = [
   { id: "TKT-001", customer: "TechCorp Ltd", subject: "Call quality issues", priority: "High", status: "Open", agent: "John Smith", created: "2024-01-05 10:30", updated: "2024-01-05 14:20" },
@@ -14,6 +16,89 @@ const DUMMY_TICKETS = [
 ];
 
 const SupportTickets = () => {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [newTicket, setNewTicket] = useState({
+    customer: "",
+    subject: "",
+    priority: "Low",
+    category: "Technical Support",
+    description: ""
+  });
+
+  const handleCreateTicket = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newTicket.customer || !newTicket.subject || !newTicket.description) {
+      toast({
+        title: "Error",
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    console.log("Creating new ticket:", newTicket);
+    toast({
+      title: "Success",
+      description: "Support ticket created successfully"
+    });
+
+    // Reset form
+    setNewTicket({
+      customer: "",
+      subject: "",
+      priority: "Low",
+      category: "Technical Support",
+      description: ""
+    });
+  };
+
+  const handleQuickAction = (action: string) => {
+    console.log(`Executing quick action: ${action}`);
+    toast({
+      title: "Action Completed",
+      description: `${action} action has been executed`
+    });
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log("Searching tickets with term:", searchTerm);
+    toast({
+      title: "Search",
+      description: `Searching tickets for: ${searchTerm}`
+    });
+  };
+
+  const handleFilter = () => {
+    console.log("Opening filter options");
+    toast({
+      title: "Filter",
+      description: "Filter options opened"
+    });
+  };
+
+  const handleExport = () => {
+    console.log("Exporting tickets data");
+    toast({
+      title: "Export",
+      description: "Tickets data exported successfully"
+    });
+  };
+
+  const handleViewTicket = (ticket: any) => {
+    setSelectedTicket(ticket);
+    console.log("Viewing ticket:", ticket.id);
+  };
+
+  const filteredTickets = DUMMY_TICKETS.filter(ticket =>
+    ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    ticket.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    ticket.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -69,43 +154,71 @@ const SupportTickets = () => {
             <CardTitle>Create New Ticket</CardTitle>
             <CardDescription>Log a new support ticket</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Customer</Label>
-              <select className="w-full border rounded-md p-2">
-                <option>Select Customer</option>
-                <option>TechCorp Ltd</option>
-                <option>Global Communications</option>
-                <option>StartUp Inc</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Subject</Label>
-              <Input placeholder="Brief description of the issue" />
-            </div>
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <select className="w-full border rounded-md p-2">
-                <option>Low</option>
-                <option>Medium</option>
-                <option>High</option>
-                <option>Critical</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <select className="w-full border rounded-md p-2">
-                <option>Technical Support</option>
-                <option>Billing</option>
-                <option>Account Management</option>
-                <option>Service Request</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea placeholder="Detailed description of the issue" rows={4} />
-            </div>
-            <Button className="w-full bg-blue-600 hover:bg-blue-700">Create Ticket</Button>
+          <CardContent>
+            <form onSubmit={handleCreateTicket} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Customer *</Label>
+                <select 
+                  className="w-full border rounded-md p-2"
+                  value={newTicket.customer}
+                  onChange={(e) => setNewTicket({...newTicket, customer: e.target.value})}
+                  required
+                >
+                  <option value="">Select Customer</option>
+                  <option value="TechCorp Ltd">TechCorp Ltd</option>
+                  <option value="Global Communications">Global Communications</option>
+                  <option value="StartUp Inc">StartUp Inc</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Subject *</Label>
+                <Input 
+                  placeholder="Brief description of the issue" 
+                  value={newTicket.subject}
+                  onChange={(e) => setNewTicket({...newTicket, subject: e.target.value})}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <select 
+                  className="w-full border rounded-md p-2"
+                  value={newTicket.priority}
+                  onChange={(e) => setNewTicket({...newTicket, priority: e.target.value})}
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <select 
+                  className="w-full border rounded-md p-2"
+                  value={newTicket.category}
+                  onChange={(e) => setNewTicket({...newTicket, category: e.target.value})}
+                >
+                  <option value="Technical Support">Technical Support</option>
+                  <option value="Billing">Billing</option>
+                  <option value="Account Management">Account Management</option>
+                  <option value="Service Request">Service Request</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Description *</Label>
+                <Textarea 
+                  placeholder="Detailed description of the issue" 
+                  rows={4}
+                  value={newTicket.description}
+                  onChange={(e) => setNewTicket({...newTicket, description: e.target.value})}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
+                Create Ticket
+              </Button>
+            </form>
           </CardContent>
         </Card>
 
@@ -115,27 +228,51 @@ const SupportTickets = () => {
             <CardDescription>Common support actions</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("Call Customer Back")}
+            >
               <span className="mr-2">📞</span>
               Call Customer Back
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("Send Email Update")}
+            >
               <span className="mr-2">📧</span>
               Send Email Update
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("Escalate Ticket")}
+            >
               <span className="mr-2">🔄</span>
               Escalate Ticket
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("View Knowledge Base")}
+            >
               <span className="mr-2">📋</span>
               View Knowledge Base
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("Assign to Team")}
+            >
               <span className="mr-2">👥</span>
               Assign to Team
             </Button>
-            <Button variant="outline" className="w-full justify-start">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start"
+              onClick={() => handleQuickAction("Generate Report")}
+            >
               <span className="mr-2">📊</span>
               Generate Report
             </Button>
@@ -151,10 +288,18 @@ const SupportTickets = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search tickets..." className="max-w-sm" />
+              <form onSubmit={handleSearch} className="flex space-x-2">
+                <Input 
+                  placeholder="Search tickets..." 
+                  className="max-w-sm"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <Button type="submit" variant="outline">Search</Button>
+              </form>
               <div className="flex space-x-2">
-                <Button variant="outline">Filter</Button>
-                <Button variant="outline">Export</Button>
+                <Button variant="outline" onClick={handleFilter}>Filter</Button>
+                <Button variant="outline" onClick={handleExport}>Export</Button>
               </div>
             </div>
             <div className="border rounded-lg">
@@ -172,7 +317,7 @@ const SupportTickets = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_TICKETS.map((ticket, index) => (
+                  {filteredTickets.map((ticket, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-4 font-mono">{ticket.id}</td>
                       <td className="p-4">{ticket.customer}</td>
@@ -199,7 +344,82 @@ const SupportTickets = () => {
                       <td className="p-4">{ticket.agent}</td>
                       <td className="p-4">{ticket.created}</td>
                       <td className="p-4">
-                        <Button variant="outline" size="sm">View</Button>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleViewTicket(ticket)}
+                            >
+                              View
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>Ticket Details - {selectedTicket?.id}</DialogTitle>
+                              <DialogDescription>
+                                Complete ticket information and history
+                              </DialogDescription>
+                            </DialogHeader>
+                            {selectedTicket && (
+                              <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <Label className="font-semibold">Customer</Label>
+                                    <p>{selectedTicket.customer}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="font-semibold">Subject</Label>
+                                    <p>{selectedTicket.subject}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="font-semibold">Priority</Label>
+                                    <Badge variant={
+                                      selectedTicket.priority === "Critical" ? "destructive" :
+                                      selectedTicket.priority === "High" ? "destructive" :
+                                      selectedTicket.priority === "Medium" ? "secondary" :
+                                      "outline"
+                                    }>
+                                      {selectedTicket.priority}
+                                    </Badge>
+                                  </div>
+                                  <div>
+                                    <Label className="font-semibold">Status</Label>
+                                    <Badge variant={
+                                      selectedTicket.status === "Resolved" ? "default" :
+                                      selectedTicket.status === "In Progress" ? "secondary" :
+                                      "outline"
+                                    }>
+                                      {selectedTicket.status}
+                                    </Badge>
+                                  </div>
+                                  <div>
+                                    <Label className="font-semibold">Assigned Agent</Label>
+                                    <p>{selectedTicket.agent}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="font-semibold">Created</Label>
+                                    <p>{selectedTicket.created}</p>
+                                  </div>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label className="font-semibold">Actions</Label>
+                                  <div className="flex space-x-2">
+                                    <Button size="sm" onClick={() => toast({title: "Success", description: "Ticket status updated"})}>
+                                      Update Status
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => toast({title: "Success", description: "Comment added to ticket"})}>
+                                      Add Comment
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => toast({title: "Success", description: "Ticket reassigned"})}>
+                                      Reassign
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </DialogContent>
+                        </Dialog>
                       </td>
                     </tr>
                   ))}
