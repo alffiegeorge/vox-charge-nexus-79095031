@@ -1,0 +1,11 @@
+
+[asterisk-connector]
+Description = MariaDB connection to 'asterisk' database
+Driver      = MariaDB
+Server      = 127.0.0.1
+Database    = asterisk
+User        = asterisk
+Password    = ASTERISK_DB_PASSWORD_PLACEHOLDER
+Port        = 3306
+Socket      = /var/run/mysqld/mysqld.sock
+Option      = 3
