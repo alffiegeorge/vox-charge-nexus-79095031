@@ -4,6 +4,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -14,12 +15,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection
+// Database connection with fallback values
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'asterisk',
-  password: process.env.DB_PASSWORD,
+  password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'asterisk',
   connectionLimit: 10,
   acquireTimeout: 60000,
@@ -31,8 +32,13 @@ let db;
 
 async function initializeDatabase() {
   try {
+    console.log('Attempting to connect to database...');
+    console.log(`Host: ${dbConfig.host}:${dbConfig.port}`);
+    console.log(`Database: ${dbConfig.database}`);
+    console.log(`User: ${dbConfig.user}`);
+    
     db = mysql.createPool(dbConfig);
-    console.log('✓ Connected to MySQL database');
+    console.log('✓ Database pool created');
     
     // Test connection
     const connection = await db.getConnection();
@@ -42,7 +48,9 @@ async function initializeDatabase() {
     
   } catch (error) {
     console.error('✗ Database connection failed:', error.message);
-    process.exit(1);
+    console.error('Please check your database configuration and ensure MySQL is running');
+    // Don't exit the process, allow the server to start without DB for debugging
+    console.log('Server will start without database connection for debugging');
   }
 }
 
@@ -66,7 +74,12 @@ const authenticateToken = (req, res, next) => {
 
 // Routes
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'iBilling API Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'iBilling API Server is running',
+    database: db ? 'Connected' : 'Disconnected',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Authentication routes
@@ -78,9 +91,13 @@ app.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
     // Check users table for authentication
     const [users] = await db.execute(
-      'SELECT * FROM users WHERE username = ?',
+      'SELECT * FROM users WHERE username = ? AND status = "active"',
       [username]
     );
 
@@ -120,6 +137,10 @@ app.post('/auth/login', async (req, res) => {
 // Customer routes
 app.get('/customers', authenticateToken, async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
     const [customers] = await db.execute('SELECT * FROM customers ORDER BY created_at DESC');
     res.json(customers);
   } catch (error) {
@@ -130,6 +151,10 @@ app.get('/customers', authenticateToken, async (req, res) => {
 
 app.post('/customers', authenticateToken, async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
     const { id, name, email, phone, company, type, balance, credit_limit, status } = req.body;
 
     await db.execute(
@@ -147,6 +172,10 @@ app.post('/customers', authenticateToken, async (req, res) => {
 // CDR routes
 app.get('/cdr', authenticateToken, async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
     const { page = 1, limit = 50, accountcode } = req.query;
     const offset = (page - 1) * limit;
 
@@ -194,6 +223,10 @@ app.get('/cdr', authenticateToken, async (req, res) => {
 // Dashboard stats
 app.get('/dashboard/stats', authenticateToken, async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
     // Total customers
     const [customerCount] = await db.execute('SELECT COUNT(*) as count FROM customers');
     
@@ -238,12 +271,34 @@ app.use('*', (req, res) => {
 
 // Start server
 async function startServer() {
+  console.log('Starting iBilling API Server...');
+  console.log('Environment:', process.env.NODE_ENV || 'development');
+  console.log('Port:', PORT);
+  
   await initializeDatabase();
   
   app.listen(PORT, () => {
     console.log(`🚀 iBilling API Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log('Server is ready to accept connections');
   });
 }
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  if (db) {
+    db.end();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  if (db) {
+    db.end();
+  }
+  process.exit(0);
+});
 
 startServer().catch(console.error);

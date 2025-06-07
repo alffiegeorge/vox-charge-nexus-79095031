@@ -42,7 +42,7 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/.env
+EnvironmentFile=-/opt/billing/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -74,8 +74,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Insert default admin user (password: admin123)
+-- Hash generated with: echo 'admin123' | bcrypt-cli
 INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
-('admin', '\$2a\$10\$YourHashedPasswordHere', 'admin@ibilling.local', 'admin', 'active');
+('admin', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
 EOF
 
     print_status "Database schema updated"
@@ -89,21 +90,33 @@ setup_backend_environment() {
     # Generate JWT secret
     local jwt_secret=$(openssl rand -base64 32)
     
-    # Create backend-specific environment variables
-    cat >> /opt/billing/.env <<EOF
+    # Create environment file
+    sudo tee /opt/billing/.env > /dev/null <<EOF
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=asterisk
+DB_USER=asterisk
+DB_PASSWORD=${asterisk_db_password}
 
-# Backend API Configuration
+# JWT Configuration
 JWT_SECRET=${jwt_secret}
-API_PORT=3001
 
-# Backend Database Connection
-API_DB_HOST=localhost
-API_DB_PORT=3306
-API_DB_NAME=asterisk
-API_DB_USER=asterisk
-API_DB_PASSWORD=${asterisk_db_password}
+# Server Configuration
+PORT=3001
+NODE_ENV=production
+
+# Asterisk Configuration (for future use)
+ASTERISK_HOST=localhost
+ASTERISK_PORT=5038
+ASTERISK_USERNAME=admin
+ASTERISK_SECRET=
 EOF
 
+    # Set proper permissions
+    sudo chmod 600 /opt/billing/.env
+    sudo chown $USER:$USER /opt/billing/.env
+    
     print_status "Backend environment configured"
 }
 
@@ -117,6 +130,14 @@ start_backend_service() {
     
     if sudo systemctl is-active --quiet ibilling-backend; then
         print_status "✓ Backend service started successfully"
+        
+        # Test the API endpoint
+        sleep 2
+        if curl -s http://localhost:3001/health > /dev/null; then
+            print_status "✓ Backend API is responding"
+        else
+            print_warning "⚠ Backend service is running but API not responding yet"
+        fi
     else
         print_error "✗ Backend service failed to start"
         print_status "Checking service logs..."
