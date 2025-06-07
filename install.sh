@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -220,12 +221,29 @@ CREATE TABLE IF NOT EXISTS customers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
+    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active'),
 ('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active'),
 ('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended');
+
+-- Insert default admin user (password: admin123)
+INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
+('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
 EOF
 
+    # ... keep existing code (configuration file creation for Asterisk, ODBC, and Nginx)
+    
     # Asterisk ODBC configuration
     sudo tee /tmp/ibilling-config/res_odbc.conf > /dev/null <<'EOF'
 [asterisk]
@@ -294,6 +312,8 @@ server {
 }
 EOF
 }
+
+# ... keep existing code (setup_database, setup_odbc, install_asterisk functions remain the same)
 
 # Setup database with proper handling for existing installations
 setup_database() {
@@ -385,7 +405,8 @@ EOF
     print_status "Database setup completed successfully"
 }
 
-# Setup ODBC
+# ... keep existing code (setup_odbc function remains the same)
+
 setup_odbc() {
     local asterisk_db_password=$1
     
@@ -410,7 +431,8 @@ setup_odbc() {
     print_status "ODBC configuration completed"
 }
 
-# Install Asterisk with improved error handling and dependency checking
+# ... keep existing code (install_asterisk function remains the same)
+
 install_asterisk() {
     local asterisk_db_password=$1
     
@@ -631,6 +653,173 @@ setup_web() {
     print_status "Web stack setup completed successfully"
 }
 
+# Setup backend API
+setup_backend() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
+    
+    print_status "Setting up backend API server..."
+    
+    # Create backend directory structure
+    create_directory "/opt/billing/backend"
+    
+    # Create backend package.json
+    sudo tee /opt/billing/backend/package.json > /dev/null <<'EOF'
+{
+  "name": "ibilling-backend",
+  "version": "1.0.0",
+  "description": "iBilling Backend API Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.6.5",
+    "cors": "^2.8.5",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.3.1",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
+EOF
+
+    # Create backend server.js (simplified for the installation script)
+    sudo tee /opt/billing/backend/server.js > /dev/null <<EOF
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+
+// Database connection
+const dbConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER || 'asterisk',
+  password: process.env.DB_PASSWORD || '${asterisk_db_password}',
+  database: process.env.DB_NAME || 'asterisk'
+};
+
+let db;
+
+async function initializeDatabase() {
+  try {
+    db = mysql.createPool(dbConfig);
+    console.log('✓ Connected to MySQL database');
+  } catch (error) {
+    console.error('✗ Database connection failed:', error.message);
+    process.exit(1);
+  }
+}
+
+// Routes
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'iBilling API Server is running' });
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    const [users] = await db.execute(
+      'SELECT * FROM users WHERE username = ?',
+      [username]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const user = users[0];
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      process.env.JWT_SECRET || 'ibilling-secret-key',
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Start server
+async function startServer() {
+  await initializeDatabase();
+  app.listen(PORT, () => {
+    console.log(\`🚀 iBilling API Server running on port \${PORT}\`);
+  });
+}
+
+startServer().catch(console.error);
+EOF
+
+    # Set proper ownership
+    sudo chown -R $USER:$USER /opt/billing/backend
+    
+    # Install dependencies
+    print_status "Installing backend dependencies..."
+    cd /opt/billing/backend
+    npm install
+    
+    # Create systemd service
+    print_status "Creating backend service..."
+    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
+[Unit]
+Description=iBilling Backend API Server
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=/opt/billing/backend
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/billing/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable and start the service
+    sudo systemctl daemon-reload
+    sudo systemctl enable ibilling-backend
+    sudo systemctl start ibilling-backend
+    
+    print_status "Backend API setup completed"
+}
+
 # System checks
 perform_system_checks() {
     print_status "Performing final system checks..."
@@ -652,6 +841,11 @@ perform_system_checks() {
         all_good=false
     fi
 
+    # Check Backend API
+    if ! check_service ibilling-backend; then
+        all_good=false
+    fi
+
     if [ "$all_good" = true ]; then
         return 0
     else
@@ -670,24 +864,30 @@ display_installation_summary() {
     echo ""
     print_status "System Information:"
     echo "• Frontend URL: http://localhost (or your server IP)"
+    echo "• Backend API: http://localhost:3001"
     echo "• Database: MariaDB on localhost:3306"
     echo "• Database Name: asterisk"
     echo "• Database User: asterisk"
     echo "• Environment File: /opt/billing/.env"
     echo ""
-    print_status "Credentials (SAVE THESE SECURELY):"
+    print_status "Login Credentials:"
+    echo "• Admin Username: admin"
+    echo "• Admin Password: admin123"
+    echo ""
+    print_status "Database Credentials (SAVE THESE SECURELY):"
     echo "• MySQL Root Password: ${mysql_root_password}"
     echo "• Asterisk DB Password: ${asterisk_db_password}"
     echo ""
     print_status "Next Steps:"
-    echo "1. Configure your domain name in Nginx if needed"
-    echo "2. Set up SSL certificates with: sudo certbot --nginx"
-    echo "3. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
-    echo "4. Review Asterisk configuration in /etc/asterisk/"
-    echo "5. Test the web interface at http://your-server-ip"
+    echo "1. Test the web interface at http://your-server-ip"
+    echo "2. Login with admin/admin123 to access the admin panel"
+    echo "3. Configure your domain name in Nginx if needed"
+    echo "4. Set up SSL certificates with: sudo certbot --nginx"
+    echo "5. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
+    echo "6. Review Asterisk configuration in /etc/asterisk/"
     echo ""
     print_warning "Remember to:"
-    echo "• Change default passwords"
+    echo "• Change the default admin password after first login"
     echo "• Configure backup procedures"
     echo "• Set up monitoring"
     echo "• Review security settings"
@@ -739,7 +939,11 @@ main() {
     print_status "Setting up web stack..."
     setup_web
 
-    # 9. Create environment file with credentials
+    # 9. Setup backend API
+    print_status "Setting up backend API..."
+    setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
+
+    # 10. Create environment file with credentials
     print_status "Creating environment configuration..."
     sudo tee /opt/billing/.env > /dev/null <<EOF
 # Database Configuration
@@ -751,6 +955,9 @@ DB_PASSWORD=${ASTERISK_DB_PASSWORD}
 
 # MySQL Root Password (for administrative tasks)
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+
+# JWT Configuration
+JWT_SECRET=$(openssl rand -base64 32)
 
 # Application Configuration
 NODE_ENV=production
@@ -764,11 +971,11 @@ EOF
     sudo chmod 600 /opt/billing/.env
     sudo chown $USER:$USER /opt/billing/.env
 
-    # 10. Perform final system checks and display summary
+    # 11. Perform final system checks and display summary
     perform_system_checks
     display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 11. Cleanup temporary files
+    # 12. Cleanup temporary files
     sudo rm -rf /tmp/ibilling-config
 
     print_status "Installation completed successfully!"
