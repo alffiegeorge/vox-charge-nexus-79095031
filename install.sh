@@ -2,6 +2,7 @@
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
+# Standalone version - no external dependencies required
 # Exit on error
 set -e
 
@@ -24,108 +25,6 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# ... keep existing code (check_and_setup_sudo function)
-
-# Check and setup sudo access
-check_and_setup_sudo() {
-    print_status "Checking sudo access..."
-    
-    # Check if user has sudo access
-    if sudo -n true 2>/dev/null; then
-        print_status "✓ User has sudo access"
-        return 0
-    fi
-    
-    print_warning "Current user ($USER) does not have sudo access"
-    
-    # Check if sudo is even installed
-    if ! command -v sudo >/dev/null 2>&1; then
-        print_error "sudo is not installed on this system"
-        print_status "Installing sudo package..."
-        su - root -c "apt update && apt install -y sudo"
-    fi
-    
-    # Check if user is in sudo group
-    if groups "$USER" | grep -q '\bsudo\b'; then
-        print_warning "User is in sudo group but sudo access is not working"
-        print_status "This might be a sudo configuration issue"
-    else
-        print_status "User is not in sudo group"
-    fi
-    
-    # Ask for root password to fix sudo access
-    echo -n "Please enter root password to configure sudo access for $USER: "
-    read -s ROOT_PASSWORD
-    echo ""
-    
-    # Comprehensive sudo fix using root access
-    print_status "Configuring sudo access..."
-    
-    # Create a temporary script to run as root
-    cat > /tmp/fix_sudo.sh << 'SCRIPT_EOF'
-#!/bin/bash
-USER_TO_FIX="$1"
-
-# Ensure sudo group exists
-groupadd -f sudo
-
-# Add user to sudo group
-usermod -aG sudo "$USER_TO_FIX"
-
-# Ensure sudoers file is properly configured
-if ! grep -q "^%sudo" /etc/sudoers; then
-    echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
-fi
-
-# Verify sudoers syntax
-visudo -c
-
-# Check if user is now in sudo group
-if groups "$USER_TO_FIX" | grep -q '\bsudo\b'; then
-    echo "✓ User $USER_TO_FIX successfully added to sudo group"
-    exit 0
-else
-    echo "✗ Failed to add user $USER_TO_FIX to sudo group"
-    exit 1
-fi
-SCRIPT_EOF
-
-    chmod +x /tmp/fix_sudo.sh
-    
-    # Execute the fix script as root
-    if echo "$ROOT_PASSWORD" | su - root -c "/tmp/fix_sudo.sh $USER"; then
-        print_status "✓ Sudo access configured successfully"
-        
-        # Clean up
-        rm -f /tmp/fix_sudo.sh
-        
-        print_warning "IMPORTANT: You must start a NEW terminal session for sudo to work"
-        print_status "Options to activate sudo access:"
-        echo "  1. Run: exec su - $USER"
-        echo "  2. Or close this terminal and open a new SSH session"
-        echo "  3. Or run: newgrp sudo && exec bash"
-        echo ""
-        print_status "After starting a new session, run this script again"
-        exit 0
-    else
-        print_error "Failed to configure sudo access"
-        rm -f /tmp/fix_sudo.sh
-        exit 1
-    fi
-}
-
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root for security reasons"
-   print_status "Please run as a regular user. The script will ask for sudo when needed."
-   exit 1
-fi
-
-# Check and setup sudo access
-check_and_setup_sudo
-
-print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
-
 generate_password() {
     openssl rand -base64 32
 }
@@ -147,7 +46,6 @@ create_directory() {
     
     sudo mkdir -p "$dir_path"
     if [ "$owner" != "root:root" ]; then
-        # Check if the user exists before trying to set ownership
         local user_name=$(echo "$owner" | cut -d: -f1)
         if id "$user_name" >/dev/null 2>&1; then
             sudo chown -R "$owner" "$dir_path"
@@ -171,13 +69,80 @@ backup_file() {
     fi
 }
 
-# ... keep existing code (create_config_files, setup_database, setup_odbc, install_asterisk functions)
+check_and_setup_sudo() {
+    print_status "Checking sudo access..."
+    
+    if sudo -n true 2>/dev/null; then
+        print_status "✓ User has sudo access"
+        return 0
+    fi
+    
+    print_warning "Current user ($USER) does not have sudo access"
+    
+    if ! command -v sudo >/dev/null 2>&1; then
+        print_error "sudo is not installed on this system"
+        print_status "Installing sudo package..."
+        su - root -c "apt update && apt install -y sudo"
+    fi
+    
+    if groups "$USER" | grep -q '\bsudo\b'; then
+        print_warning "User is in sudo group but sudo access is not working"
+        print_status "This might be a sudo configuration issue"
+    else
+        print_status "User is not in sudo group"
+    fi
+    
+    echo -n "Please enter root password to configure sudo access for $USER: "
+    read -s ROOT_PASSWORD
+    echo ""
+    
+    print_status "Configuring sudo access..."
+    
+    cat > /tmp/fix_sudo.sh << 'SCRIPT_EOF'
+#!/bin/bash
+USER_TO_FIX="$1"
 
-# Create configuration files
+groupadd -f sudo
+usermod -aG sudo "$USER_TO_FIX"
+
+if ! grep -q "^%sudo" /etc/sudoers; then
+    echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
+fi
+
+visudo -c
+
+if groups "$USER_TO_FIX" | grep -q '\bsudo\b'; then
+    echo "✓ User $USER_TO_FIX successfully added to sudo group"
+    exit 0
+else
+    echo "✗ Failed to add user $USER_TO_FIX to sudo group"
+    exit 1
+fi
+SCRIPT_EOF
+
+    chmod +x /tmp/fix_sudo.sh
+    
+    if echo "$ROOT_PASSWORD" | su - root -c "/tmp/fix_sudo.sh $USER"; then
+        print_status "✓ Sudo access configured successfully"
+        rm -f /tmp/fix_sudo.sh
+        print_warning "IMPORTANT: You must start a NEW terminal session for sudo to work"
+        print_status "Options to activate sudo access:"
+        echo "  1. Run: exec su - $USER"
+        echo "  2. Or close this terminal and open a new SSH session"
+        echo "  3. Or run: newgrp sudo && exec bash"
+        echo ""
+        print_status "After starting a new session, run this script again"
+        exit 0
+    else
+        print_error "Failed to configure sudo access"
+        rm -f /tmp/fix_sudo.sh
+        exit 1
+    fi
+}
+
 create_config_files() {
     print_status "Creating configuration files..."
     
-    # Create config directory
     sudo mkdir -p /tmp/ibilling-config
     
     # Database schema
@@ -315,7 +280,6 @@ server {
 EOF
 }
 
-# Setup database with proper handling for existing installations
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -324,25 +288,17 @@ setup_database() {
     sudo systemctl start mariadb
     sudo systemctl enable mariadb
 
-    # Check if MariaDB is already configured by trying different connection methods
     print_status "Checking MariaDB configuration status..."
     
-    # Try to connect without password (fresh installation)
     if sudo mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
         print_status "MariaDB is using socket authentication - setting up for first time..."
         
-        # Secure MariaDB installation for fresh install
         sudo mysql <<EOF
--- Set root password and switch to mysql_native_password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
--- Remove anonymous users
 DELETE FROM mysql.user WHERE User='';
--- Remove remote root access
 DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
--- Remove test database
 DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
--- Reload privileges
 FLUSH PRIVILEGES;
 EOF
         
@@ -353,43 +309,30 @@ EOF
         print_warning "MariaDB root password is set but doesn't match our generated password"
         print_status "This might be from a previous installation attempt"
         
-        # Try to reset MariaDB to use our password
-        print_status "Attempting to reset MariaDB configuration..."
-        
-        # Stop MariaDB
         sudo systemctl stop mariadb
-        
-        # Start MariaDB in safe mode to reset password
         sudo mysqld_safe --skip-grant-tables --skip-networking &
         SAFE_PID=$!
         sleep 5
         
-        # Reset root password
         mysql -u root <<EOF
 FLUSH PRIVILEGES;
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
 FLUSH PRIVILEGES;
 EOF
         
-        # Kill safe mode process
         sudo kill $SAFE_PID 2>/dev/null || true
         sleep 2
-        
-        # Restart MariaDB normally
         sudo systemctl start mariadb
         
-        # Verify the password works
         if ! mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
             print_error "Failed to reset MariaDB root password"
             print_status "Please manually reset MariaDB and run the script again"
-            print_status "You can reset MariaDB with: sudo mysql_secure_installation"
             exit 1
         fi
         
         print_status "✓ MariaDB root password reset successfully"
     fi
 
-    # Create Asterisk database and user
     print_status "Creating Asterisk database and user..."
     mysql -u root -p"${mysql_root_password}" <<EOF
 CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -398,7 +341,6 @@ GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
-    # Create database tables
     print_status "Creating database tables..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
     
@@ -410,15 +352,10 @@ setup_odbc() {
     
     print_status "Configuring ODBC..."
     
-    # Write ODBC driver config
     sudo cp /tmp/ibilling-config/odbcinst.ini /etc/odbcinst.ini
-
-    # Write ODBC DSN config from template
     sudo cp /tmp/ibilling-config/odbc.ini.template /etc/odbc.ini
-    # Use | as delimiter instead of / to avoid conflicts with file paths
     sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/odbc.ini
 
-    # Test ODBC connection
     print_status "Testing ODBC connection..."
     if isql -v asterisk-connector asterisk "${asterisk_db_password}" <<< "SELECT 1;" >/dev/null 2>&1; then
         print_status "✓ ODBC connection test successful"
@@ -434,7 +371,6 @@ install_asterisk() {
     
     print_status "Installing Asterisk with ODBC support..."
     
-    # Ensure all required development packages are installed
     print_status "Installing additional Asterisk build dependencies..."
     sudo apt update
     sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
@@ -442,18 +378,15 @@ install_asterisk() {
         libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
         libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev
     
-    # Check if we're already in an asterisk source directory
     ASTERISK_DIR=""
     if [ -d "/usr/src/asterisk-20"* ]; then
         ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
         print_status "Found existing Asterisk source directory: $ASTERISK_DIR"
     fi
     
-    # If no existing directory, download and extract
     if [ -z "$ASTERISK_DIR" ]; then
         cd /usr/src
         
-        # Download Asterisk if not already downloaded
         if [ ! -f "asterisk-20-current.tar.gz" ]; then
             print_status "Downloading Asterisk..."
             sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
@@ -461,7 +394,6 @@ install_asterisk() {
             print_status "Asterisk source archive already exists"
         fi
         
-        # Extract if not already extracted
         if [ ! -d "asterisk-20"* ]; then
             print_status "Extracting Asterisk..."
             sudo tar xzf asterisk-20-current.tar.gz
@@ -475,7 +407,6 @@ install_asterisk() {
     cd "$ASTERISK_DIR"
     print_status "Working in directory: $ASTERISK_DIR"
 
-    # Get MP3 source if needed
     print_status "Checking MP3 source..."
     if [ ! -f "addons/mp3/mpg123.h" ]; then
         print_status "Getting MP3 source..."
@@ -484,14 +415,12 @@ install_asterisk() {
         print_status "MP3 source already present"
     fi
 
-    # Clean previous build attempts if there were compilation errors
     if [ -f "config.log" ] && grep -q "error" config.log; then
         print_status "Cleaning previous build attempt due to errors..."
         sudo make clean || true
         sudo rm -f config.log menuselect.makeopts || true
     fi
 
-    # Configure Asterisk build if not already configured
     if [ ! -f "config.log" ]; then
         print_status "Configuring Asterisk build..."
         sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
@@ -503,7 +432,6 @@ install_asterisk() {
         print_status "Asterisk build already configured"
     fi
 
-    # Create menuselect configuration if needed
     if [ ! -f "menuselect.makeopts" ]; then
         print_status "Creating menuselect configuration..."
         sudo make menuselect.makeopts
@@ -515,36 +443,29 @@ install_asterisk() {
         print_status "Menuselect configuration already exists"
     fi
     
-    # Enable ODBC modules and disable problematic modules
     print_status "Configuring required modules..."
     sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
     sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts 2>/dev/null || true
     sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
     
-    # Disable res_config_curl if libcurl development headers are not available
     if ! pkg-config --exists libcurl; then
         print_warning "libcurl development headers not found, disabling res_config_curl"
         sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl" | sudo tee -a menuselect.makeopts
     fi
 
-    # Build Asterisk if not already built
     if [ ! -f "main/asterisk" ]; then
         print_status "Building Asterisk (this may take 10-20 minutes)..."
         sudo make -j$(nproc)
         if [ $? -ne 0 ]; then
             print_error "Asterisk build failed"
-            print_error "This might be due to missing dependencies or compilation errors"
             print_status "Trying to disable problematic modules and rebuild..."
             
-            # Disable additional modules that might cause issues
             sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl res_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl res_curl" | sudo tee -a menuselect.makeopts
             
-            # Try building again
             sudo make clean
             sudo make -j$(nproc)
             if [ $? -ne 0 ]; then
                 print_error "Asterisk build failed even after disabling problematic modules"
-                print_status "Check the output above for specific error messages"
                 exit 1
             fi
         fi
@@ -552,7 +473,6 @@ install_asterisk() {
         print_status "Asterisk already built, skipping compilation"
     fi
 
-    # Install Asterisk
     print_status "Installing Asterisk..."
     sudo make install
     if [ $? -ne 0 ]; then
@@ -560,7 +480,6 @@ install_asterisk() {
         exit 1
     fi
 
-    # Install sample configs and init scripts if not already done
     if [ ! -f "/etc/asterisk/asterisk.conf" ]; then
         print_status "Installing sample configurations..."
         sudo make samples
@@ -571,7 +490,6 @@ install_asterisk() {
     
     sudo ldconfig
 
-    # Create asterisk user and group if they don't exist
     if ! id asterisk >/dev/null 2>&1; then
         print_status "Creating asterisk user and group..."
         sudo groupadd -r asterisk
@@ -581,34 +499,27 @@ install_asterisk() {
         print_status "Asterisk user already exists"
     fi
 
-    # Set proper ownership for asterisk directories
     print_status "Setting proper ownership for Asterisk directories..."
     sudo chown -R asterisk:asterisk /var/lib/asterisk
     sudo chown -R asterisk:asterisk /var/log/asterisk
     sudo chown -R asterisk:asterisk /var/spool/asterisk
     sudo chown -R asterisk:asterisk /etc/asterisk
 
-    # Configure Asterisk for ODBC
     print_status "Configuring Asterisk..."
 
-    # Backup original configs
     backup_file /etc/asterisk/res_odbc.conf
 
-    # Copy configuration templates
     sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
     sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
 
-    # Replace password placeholder in configuration files using | delimiter
     sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/asterisk/res_odbc.conf
 
-    # Start and enable Asterisk
     sudo systemctl enable asterisk
     sudo systemctl start asterisk
 
     print_status "Asterisk installation and configuration completed"
 }
 
-# Setup web stack
 setup_web() {
     print_status "Installing Node.js and npm..."
     curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
@@ -617,31 +528,22 @@ setup_web() {
     print_status "Setting up iBilling frontend..."
     cd /opt/billing/web
 
-    # Remove existing files if any
     sudo rm -rf ./*
 
-    # Clone the repository
     sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031 .
 
-    # Set permissions for the current user
     sudo chown -R $USER:$USER /opt/billing/web
 
-    # Install npm dependencies
     npm install
-
-    # Build the project
     npm run build
 
     print_status "Configuring Nginx..."
     
-    # Copy Nginx configuration
     sudo cp /tmp/ibilling-config/nginx-ibilling.conf /etc/nginx/sites-available/ibilling
 
-    # Enable the site
     sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
     sudo rm -f /etc/nginx/sites-enabled/default
 
-    # Test and restart Nginx
     sudo nginx -t
     sudo systemctl enable nginx
     sudo systemctl restart nginx
@@ -649,26 +551,19 @@ setup_web() {
     print_status "Web stack setup completed successfully"
 }
 
-# Setup backend API - UPDATED to use the correct backend directory and environment file
 setup_backend() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
     
     print_status "Setting up backend API server..."
     
-    # The backend files are already in /opt/billing/web/backend from the git clone
-    # We just need to install dependencies and configure the environment
-    
     cd /opt/billing/web/backend
     
-    # Set proper ownership
     sudo chown -R $USER:$USER /opt/billing/web/backend
     
-    # Install dependencies
     print_status "Installing backend dependencies..."
     npm install
     
-    # Create environment file with the actual database password
     print_status "Creating backend environment file..."
     tee /opt/billing/web/backend/.env > /dev/null <<EOF
 # Database Configuration
@@ -692,7 +587,6 @@ ASTERISK_USERNAME=admin
 ASTERISK_SECRET=
 EOF
     
-    # Create systemd service pointing to the correct backend directory
     print_status "Creating backend service..."
     sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
 [Unit]
@@ -713,7 +607,6 @@ EnvironmentFile=/opt/billing/web/backend/.env
 WantedBy=multi-user.target
 EOF
 
-    # Enable and start the service
     sudo systemctl daemon-reload
     sudo systemctl enable ibilling-backend
     sudo systemctl start ibilling-backend
@@ -721,28 +614,23 @@ EOF
     print_status "Backend API setup completed"
 }
 
-# System checks
 perform_system_checks() {
     print_status "Performing final system checks..."
 
     local all_good=true
 
-    # Check MariaDB
     if ! check_service mariadb; then
         all_good=false
     fi
 
-    # Check Asterisk
     if ! check_service asterisk; then
         all_good=false
     fi
 
-    # Check Nginx
     if ! check_service nginx; then
         all_good=false
     fi
 
-    # Check Backend API
     if ! check_service ibilling-backend; then
         all_good=false
     fi
@@ -754,7 +642,6 @@ perform_system_checks() {
     fi
 }
 
-# Display installation summary
 display_installation_summary() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -796,8 +683,20 @@ display_installation_summary() {
     print_status "Installation completed successfully!"
 }
 
-# MAIN INSTALLATION PROCESS
+# Main installation function
 main() {
+    # Check if running as root
+    if [[ $EUID -eq 0 ]]; then
+       print_error "This script should not be run as root for security reasons"
+       print_status "Please run as a regular user. The script will ask for sudo when needed."
+       exit 1
+    fi
+
+    # Check and setup sudo access
+    check_and_setup_sudo
+
+    print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
+
     # 1. Create directory structure
     print_status "Creating directory structure..."
     create_directory "/opt/billing/web"
@@ -808,7 +707,7 @@ main() {
     # 2. Create configuration files
     create_config_files
 
-    # 3. Update system and install dependencies (including libcurl for Asterisk)
+    # 3. Update system and install dependencies
     print_status "Updating system and installing dependencies..."
     sudo apt update && sudo apt upgrade -y
     sudo apt install -y mariadb-server git curl unixodbc unixodbc-dev libmariadb-dev odbc-mariadb \
@@ -835,11 +734,11 @@ main() {
     print_status "Installing Asterisk..."
     install_asterisk "${ASTERISK_DB_PASSWORD}"
 
-    # 8. Setup web stack (this clones the repository which includes the backend)
+    # 8. Setup web stack
     print_status "Setting up web stack..."
     setup_web
 
-    # 9. Setup backend API (updated to use the correct paths and set the actual password)
+    # 9. Setup backend API
     print_status "Setting up backend API..."
     setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
