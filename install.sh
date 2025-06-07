@@ -1,5 +1,4 @@
 
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -299,7 +298,7 @@ server {
 EOF
 }
 
-# Setup database with modern MariaDB syntax
+# Setup database with proper Debian 12 MariaDB handling
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -308,18 +307,20 @@ setup_database() {
     sudo systemctl start mariadb
     sudo systemctl enable mariadb
 
-    # Get MariaDB version to determine the correct syntax
-    MARIADB_VERSION=$(sudo mysql --version | grep -oP '\d+\.\d+' | head -1)
-    
-    # Secure MariaDB installation with modern syntax
+    # On Debian 12, MariaDB uses unix_socket authentication by default for root
+    # We need to use sudo mysql instead of mysql -u root
     print_status "Securing MariaDB installation..."
-    sudo mysql -u root <<EOF
--- Use modern authentication method for MariaDB 10.4+
+    sudo mysql <<EOF
+-- Set root password and switch to mysql_native_password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
+-- Remove anonymous users
 DELETE FROM mysql.user WHERE User='';
+-- Remove remote root access
 DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+-- Remove test database
 DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+-- Reload privileges
 FLUSH PRIVILEGES;
 EOF
 
@@ -603,4 +604,3 @@ EOF
 
 # Execute main function
 main "$@"
-
