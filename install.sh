@@ -652,7 +652,11 @@ perform_system_checks() {
         all_good=false
     fi
 
-    return $all_good
+    if [ "$all_good" = true ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Display installation summary
