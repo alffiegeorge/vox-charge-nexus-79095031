@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
@@ -59,6 +58,7 @@ async function initializeDatabase() {
 
 async function createUsersTable() {
   try {
+    console.log('Creating/checking users table...');
     await db.execute(`
       CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -71,34 +71,50 @@ async function createUsersTable() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
+    console.log('✓ Users table created/exists');
     
     // Check if admin user exists, if not create it
     const [existingAdmin] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin']);
+    console.log('Admin user check result:', existingAdmin[0]);
     
     if (existingAdmin[0].count === 0) {
+      console.log('Creating default admin user...');
       const hashedPassword = await bcrypt.hash('admin123', 10);
+      console.log('Admin password hash generated:', hashedPassword);
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
       );
       console.log('✓ Default admin user created with password: admin123');
+    } else {
+      console.log('Admin user already exists');
     }
     
     // Check if customer user exists, if not create it
     const [existingCustomer] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['customer']);
+    console.log('Customer user check result:', existingCustomer[0]);
     
     if (existingCustomer[0].count === 0) {
+      console.log('Creating default customer user...');
       const hashedPassword = await bcrypt.hash('customer123', 10);
+      console.log('Customer password hash generated:', hashedPassword);
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']
       );
       console.log('✓ Default customer user created with password: customer123');
+    } else {
+      console.log('Customer user already exists');
     }
+    
+    // Let's also verify the users are in the database
+    const [allUsers] = await db.execute('SELECT id, username, role, status FROM users');
+    console.log('All users in database:', allUsers);
     
     console.log('✓ Users table ready');
   } catch (error) {
     console.error('Error setting up users table:', error.message);
+    console.error('Full error:', error);
   }
 }
 
@@ -135,7 +151,11 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    console.log('Login attempt for username:', username);
+    console.log('=== LOGIN ATTEMPT ===');
+    console.log('Username:', username);
+    console.log('Password provided:', password ? 'Yes' : 'No');
+    console.log('Password length:', password ? password.length : 0);
+    console.log('Request body:', req.body);
 
     if (!username || !password) {
       console.log('Missing username or password');
@@ -150,49 +170,63 @@ app.post('/auth/login', async (req, res) => {
     // Check users table for authentication
     console.log('Querying database for user:', username);
     const [users] = await db.execute(
-      'SELECT * FROM users WHERE username = ? AND status = "active"',
+      'SELECT id, username, password, email, role, status FROM users WHERE username = ?',
       [username]
     );
 
-    console.log('Database query result:', users.length > 0 ? 'User found' : 'User not found');
-
-    if (users.length === 0) {
-      console.log('Invalid credentials - user not found or inactive');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const user = users[0];
-    console.log('User found, checking password...');
-    console.log('Stored hash:', user.password);
-    
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    console.log('Password validation result:', isValidPassword);
-
-    if (!isValidPassword) {
-      console.log('Invalid credentials - wrong password');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    console.log('Login successful for user:', username);
-
-    const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '24h' }
-    );
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        email: user.email
+    console.log('Database query result count:', users.length);
+    if (users.length > 0) {
+      const user = users[0];
+      console.log('User found:');
+      console.log('- ID:', user.id);
+      console.log('- Username:', user.username);
+      console.log('- Role:', user.role);
+      console.log('- Status:', user.status);
+      console.log('- Email:', user.email);
+      console.log('- Stored password hash:', user.password);
+      
+      if (user.status !== 'active') {
+        console.log('User account is not active:', user.status);
+        return res.status(401).json({ error: 'Account is not active' });
       }
-    });
+      
+      console.log('Comparing passwords...');
+      console.log('Input password:', password);
+      console.log('Stored hash:', user.password);
+      
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      console.log('Password comparison result:', isValidPassword);
+
+      if (!isValidPassword) {
+        console.log('Password comparison failed');
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      console.log('Login successful for user:', username);
+
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        process.env.JWT_SECRET || 'your-secret-key',
+        { expiresIn: '24h' }
+      );
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          email: user.email
+        }
+      });
+    } else {
+      console.log('No user found with username:', username);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
   } catch (error) {
     console.error('Login error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
