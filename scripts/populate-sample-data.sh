@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # Populate sample data for all iBilling database tables
@@ -15,22 +14,167 @@ populate_all_tables() {
     print_status "Populating all database tables with sample data..."
     
     mysql -u root -p"${mysql_root_password}" asterisk <<'EOF'
--- Clear existing sample data
-DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id LIKE 'C%');
-DELETE FROM invoices WHERE customer_id LIKE 'C%';
-DELETE FROM payments WHERE customer_id LIKE 'C%';
-DELETE FROM sms_messages WHERE customer_id LIKE 'C%';
-DELETE FROM support_tickets WHERE customer_id LIKE 'C%';
-DELETE FROM audit_logs WHERE user_id <= 10;
-DELETE FROM sipusers WHERE name LIKE 'demo%';
-DELETE FROM voicemail WHERE customer_id LIKE 'C%';
-DELETE FROM routes WHERE id <= 10;
-DELETE FROM trunks WHERE name LIKE 'Demo%' OR name LIKE 'Sample%';
-DELETE FROM did_numbers WHERE customer_id LIKE 'C%';
-DELETE FROM rates WHERE id <= 20;
-DELETE FROM customers WHERE id LIKE 'C%';
-DELETE FROM admin_users WHERE username IN ('admin', 'operator1', 'support1');
-DELETE FROM cdr WHERE accountcode LIKE 'C%';
+-- First ensure all tables exist
+CREATE TABLE IF NOT EXISTS invoice_items (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT(11) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    quantity DECIMAL(10,3) NOT NULL DEFAULT 1.000,
+    unit_price DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+    total_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    item_type ENUM('Call', 'SMS', 'DID', 'Service', 'Other') DEFAULT 'Other',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) NOT NULL,
+    invoice_date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled') DEFAULT 'Draft',
+    payment_date DATE DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(20) NOT NULL,
+    invoice_id INT(11) DEFAULT NULL,
+    payment_method ENUM('Cash', 'Bank Transfer', 'Credit Card', 'Mobile Money', 'Crypto') NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    currency VARCHAR(3) DEFAULT 'VUV',
+    reference_number VARCHAR(100) DEFAULT NULL,
+    transaction_id VARCHAR(100) DEFAULT NULL,
+    status ENUM('Pending', 'Completed', 'Failed', 'Refunded') DEFAULT 'Pending',
+    payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sms_messages (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    from_number VARCHAR(20) NOT NULL,
+    to_number VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    direction ENUM('Inbound', 'Outbound') NOT NULL,
+    status ENUM('Pending', 'Sent', 'Delivered', 'Failed') DEFAULT 'Pending',
+    cost DECIMAL(8,4) DEFAULT 0.0000,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS sms_templates (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    message TEXT NOT NULL,
+    category VARCHAR(50) DEFAULT 'general',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    ticket_number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    subject VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    priority ENUM('Low', 'Medium', 'High', 'Critical') DEFAULT 'Medium',
+    status ENUM('Open', 'In Progress', 'Resolved', 'Closed') DEFAULT 'Open',
+    assigned_to INT(11) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT(11) DEFAULT NULL,
+    user_type ENUM('admin', 'customer') DEFAULT 'admin',
+    action VARCHAR(100) NOT NULL,
+    table_name VARCHAR(50) DEFAULT NULL,
+    record_id VARCHAR(50) DEFAULT NULL,
+    old_values JSON DEFAULT NULL,
+    new_values JSON DEFAULT NULL,
+    ip_address VARCHAR(45) DEFAULT NULL,
+    user_agent TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS admin_users (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    salt VARCHAR(32) NOT NULL,
+    full_name VARCHAR(100) DEFAULT NULL,
+    role ENUM('Super Admin', 'Admin', 'Operator', 'Support') DEFAULT 'Operator',
+    status ENUM('Active', 'Suspended', 'Locked') DEFAULT 'Active',
+    last_login TIMESTAMP NULL,
+    login_attempts INT DEFAULT 0,
+    locked_until TIMESTAMP NULL,
+    two_factor_enabled BOOLEAN DEFAULT FALSE,
+    two_factor_secret VARCHAR(32) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS voicemail (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    customer_id VARCHAR(40) NOT NULL,
+    context VARCHAR(40) NOT NULL DEFAULT 'default',
+    mailbox VARCHAR(40) NOT NULL DEFAULT '0',
+    password VARCHAR(40) NOT NULL DEFAULT '0',
+    fullname VARCHAR(40) NOT NULL DEFAULT '',
+    email VARCHAR(40) DEFAULT NULL,
+    pager VARCHAR(40) DEFAULT NULL,
+    tz VARCHAR(40) DEFAULT 'central',
+    attach VARCHAR(40) DEFAULT 'yes',
+    saycid VARCHAR(40) DEFAULT 'yes',
+    dialout VARCHAR(40) DEFAULT '',
+    callback VARCHAR(40) DEFAULT '',
+    review VARCHAR(40) DEFAULT 'no',
+    operator VARCHAR(40) DEFAULT 'yes',
+    envelope VARCHAR(40) DEFAULT 'no',
+    sayduration VARCHAR(40) DEFAULT 'no',
+    saydurationm VARCHAR(40) DEFAULT '1',
+    sendvoicemail VARCHAR(40) DEFAULT 'no',
+    delete_vm VARCHAR(40) DEFAULT 'no',
+    nextaftercmd VARCHAR(40) DEFAULT 'yes',
+    forcename VARCHAR(40) DEFAULT 'no',
+    forcegreetings VARCHAR(40) DEFAULT 'no',
+    hidefromdir VARCHAR(40) DEFAULT 'yes',
+    stamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+-- Now safely clear existing sample data only if tables exist
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='asterisk' AND table_name='invoice_items') > 0,
+    'DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id LIKE "C%")',
+    'SELECT "invoice_items table does not exist" as message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='asterisk' AND table_name='invoices') > 0,
+    'DELETE FROM invoices WHERE customer_id LIKE "C%"',
+    'SELECT "invoices table does not exist" as message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='asterisk' AND table_name='payments') > 0,
+    'DELETE FROM payments WHERE customer_id LIKE "C%"',
+    'SELECT "payments table does not exist" as message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Insert comprehensive customer data
 INSERT INTO customers (id, name, email, phone, company, type, balance, credit_limit, status, address, qr_code_enabled, qr_code_data) VALUES
@@ -41,7 +185,8 @@ INSERT INTO customers (id, name, email, phone, company, type, balance, credit_li
 ('C005', 'David Wilson', 'david.wilson@example.com', '+1-555-0654', 'Wilson Solutions', 'Postpaid', 0.00, 1000.00, 'Suspended', '654 Maple Ln, Seattle, WA 98101', FALSE, NULL),
 ('C006', 'Emma Davis', 'emma.davis@example.com', '+1-555-0987', 'Davis Tech', 'Prepaid', 89.75, NULL, 'Active', '987 Cedar Rd, Boston, MA 02101', TRUE, 'QR_CODE_DATA_C006'),
 ('C007', 'Michael Brown', 'michael.brown@example.com', '+1-555-0147', 'Brown Holdings', 'Postpaid', 150.30, 750.00, 'Active', '147 Birch St, Denver, CO 80201', FALSE, NULL),
-('C008', 'Sarah Miller', 'sarah.miller@example.com', '+1-555-0258', 'Miller Group', 'Prepaid', 45.60, NULL, 'Active', '258 Spruce Ave, Phoenix, AZ 85001', TRUE, 'QR_CODE_DATA_C008');
+('C008', 'Sarah Miller', 'sarah.miller@example.com', '+1-555-0258', 'Miller Group', 'Prepaid', 45.60, NULL, 'Active', '258 Spruce Ave, Phoenix, AZ 85001', TRUE, 'QR_CODE_DATA_C008')
+ON DUPLICATE KEY UPDATE name=VALUES(name);
 
 -- Insert comprehensive rates data
 INSERT INTO rates (destination_prefix, destination_name, rate_per_minute, min_duration, billing_increment, effective_date, status) VALUES
@@ -219,37 +364,37 @@ EOF
     mysql -u root -p"${mysql_root_password}" asterisk -e "
         SELECT 'Customers' as Table_Name, COUNT(*) as Record_Count FROM customers
         UNION ALL
-        SELECT 'Rates', COUNT(*) FROM rates
+        SELECT 'Rates', COALESCE((SELECT COUNT(*) FROM rates), 0) FROM dual
         UNION ALL
-        SELECT 'DID Numbers', COUNT(*) FROM did_numbers
+        SELECT 'DID Numbers', COALESCE((SELECT COUNT(*) FROM did_numbers), 0) FROM dual
         UNION ALL
-        SELECT 'Admin Users', COUNT(*) FROM admin_users
+        SELECT 'Admin Users', COALESCE((SELECT COUNT(*) FROM admin_users), 0) FROM dual
         UNION ALL
-        SELECT 'Trunks', COUNT(*) FROM trunks
+        SELECT 'Trunks', COALESCE((SELECT COUNT(*) FROM trunks), 0) FROM dual
         UNION ALL
-        SELECT 'Routes', COUNT(*) FROM routes
+        SELECT 'Routes', COALESCE((SELECT COUNT(*) FROM routes), 0) FROM dual
         UNION ALL
-        SELECT 'SIP Users', COUNT(*) FROM sipusers
+        SELECT 'SIP Users', COALESCE((SELECT COUNT(*) FROM sipusers), 0) FROM dual
         UNION ALL
-        SELECT 'Voicemail', COUNT(*) FROM voicemail
+        SELECT 'Voicemail', COALESCE((SELECT COUNT(*) FROM voicemail), 0) FROM dual
         UNION ALL
         SELECT 'CDR Records', COUNT(*) FROM cdr
         UNION ALL
-        SELECT 'Invoices', COUNT(*) FROM invoices
+        SELECT 'Invoices', COALESCE((SELECT COUNT(*) FROM invoices), 0) FROM dual
         UNION ALL
-        SELECT 'Invoice Items', COUNT(*) FROM invoice_items
+        SELECT 'Invoice Items', COALESCE((SELECT COUNT(*) FROM invoice_items), 0) FROM dual
         UNION ALL
-        SELECT 'Payments', COUNT(*) FROM payments
+        SELECT 'Payments', COALESCE((SELECT COUNT(*) FROM payments), 0) FROM dual
         UNION ALL
-        SELECT 'SMS Messages', COUNT(*) FROM sms_messages
+        SELECT 'SMS Messages', COALESCE((SELECT COUNT(*) FROM sms_messages), 0) FROM dual
         UNION ALL
-        SELECT 'SMS Templates', COUNT(*) FROM sms_templates
+        SELECT 'SMS Templates', COALESCE((SELECT COUNT(*) FROM sms_templates), 0) FROM dual
         UNION ALL
-        SELECT 'Support Tickets', COUNT(*) FROM support_tickets
+        SELECT 'Support Tickets', COALESCE((SELECT COUNT(*) FROM support_tickets), 0) FROM dual
         UNION ALL
-        SELECT 'Audit Logs', COUNT(*) FROM audit_logs
+        SELECT 'Audit Logs', COALESCE((SELECT COUNT(*) FROM audit_logs), 0) FROM dual
         UNION ALL
-        SELECT 'System Settings', COUNT(*) FROM system_settings;
+        SELECT 'System Settings', COALESCE((SELECT COUNT(*) FROM system_settings), 0) FROM dual;
     "
 }
 
