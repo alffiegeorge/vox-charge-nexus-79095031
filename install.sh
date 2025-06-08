@@ -76,64 +76,20 @@ check_and_setup_sudo() {
     fi
     
     print_warning "Current user ($USER) does not have sudo access"
+    print_status "Running sudo fix script..."
     
-    if ! command -v sudo >/dev/null 2>&1; then
-        print_error "sudo is not installed on this system"
-        print_status "Installing sudo package..."
-        su - root -c "apt update && apt install -y sudo"
-    fi
-    
-    if groups "$USER" | grep -q '\bsudo\b'; then
-        print_warning "User is in sudo group but sudo access is not working"
-        print_status "This might be a sudo configuration issue"
-    else
-        print_status "User is not in sudo group"
-    fi
-    
-    echo -n "Please enter root password to configure sudo access for $USER: "
-    read -s ROOT_PASSWORD
-    echo ""
-    
-    print_status "Configuring sudo access..."
-    
-    cat > /tmp/fix_sudo.sh << 'SCRIPT_EOF'
-#!/bin/bash
-USER_TO_FIX="$1"
-
-groupadd -f sudo
-usermod -aG sudo "$USER_TO_FIX"
-
-if ! grep -q "^%sudo" /etc/sudoers; then
-    echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
-fi
-
-visudo -c
-
-if groups "$USER_TO_FIX" | grep -q '\bsudo\b'; then
-    echo "✓ User $USER_TO_FIX successfully added to sudo group"
-    exit 0
-else
-    echo "✗ Failed to add user $USER_TO_FIX to sudo group"
-    exit 1
-fi
-SCRIPT_EOF
-
-    chmod +x /tmp/fix_sudo.sh
-    
-    if echo "$ROOT_PASSWORD" | su - root -c "/tmp/fix_sudo.sh $USER"; then
-        print_status "✓ Sudo access configured successfully"
-        rm -f /tmp/fix_sudo.sh
+    # Use the dedicated sudo fix script
+    if "${SCRIPT_DIR}/scripts/fix-sudo-access.sh"; then
+        print_status "Sudo access has been configured"
         print_warning "IMPORTANT: You must start a NEW terminal session for sudo to work"
-        print_status "Options to activate sudo access:"
-        echo "  1. Run: exec su - $USER"
-        echo "  2. Or close this terminal and open a new SSH session"
-        echo "  3. Or run: newgrp sudo && exec bash"
-        echo ""
-        print_status "After starting a new session, run this script again"
+        print_status "Please:"
+        echo "  1. Close this terminal"
+        echo "  2. Open a new terminal/SSH session"
+        echo "  3. Run this install script again"
         exit 0
     else
         print_error "Failed to configure sudo access"
-        rm -f /tmp/fix_sudo.sh
+        print_status "Please fix sudo access manually and run this script again"
         exit 1
     fi
 }
