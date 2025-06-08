@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { apiClient } from "@/lib/api";
 
 interface Rate {
   id: string;
@@ -17,17 +18,10 @@ interface Rate {
   description: string;
 }
 
-const DUMMY_RATES: Rate[] = [
-  { id: "1", destination: "USA Local", prefix: "1", rate: "$0.02", connection: "$0.01", description: "US Local calls" },
-  { id: "2", destination: "UK Mobile", prefix: "447", rate: "$0.15", connection: "$0.05", description: "UK Mobile numbers" },
-  { id: "3", destination: "Canada", prefix: "1", rate: "$0.03", connection: "$0.01", description: "Canada calls" },
-  { id: "4", destination: "Germany", prefix: "49", rate: "$0.08", connection: "$0.03", description: "Germany calls" },
-  { id: "5", destination: "Australia Mobile", prefix: "614", rate: "$0.25", connection: "$0.08", description: "Australia Mobile" }
-];
-
 const Rates = () => {
   const { toast } = useToast();
-  const [rates, setRates] = useState<Rate[]>(DUMMY_RATES);
+  const [rates, setRates] = useState<Rate[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -41,6 +35,39 @@ const Rates = () => {
     connection: "",
     description: ""
   });
+
+  useEffect(() => {
+    fetchRates();
+  }, []);
+
+  const fetchRates = async () => {
+    try {
+      console.log('Fetching rates from database...');
+      const data = await apiClient.getRates() as any[];
+      console.log('Rates data received:', data);
+      
+      // Transform the data to match our interface
+      const transformedRates = data.map((rate: any) => ({
+        id: rate.id || rate.rate_id,
+        destination: rate.destination,
+        prefix: rate.prefix,
+        rate: rate.rate ? `$${rate.rate}` : "$0.00",
+        connection: rate.connection_fee ? `$${rate.connection_fee}` : "$0.00",
+        description: rate.description || ""
+      }));
+      
+      setRates(transformedRates);
+    } catch (error) {
+      console.error('Error fetching rates:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load rates from database",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredRates = rates.filter(rate =>
     rate.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -71,7 +98,7 @@ const Rates = () => {
     setIsEditDialogOpen(true);
   };
 
-  const handleSaveRate = (isEdit: boolean) => {
+  const handleSaveRate = async (isEdit: boolean) => {
     if (!rateForm.destination || !rateForm.prefix || !rateForm.rate || !rateForm.connection) {
       toast({
         title: "Error",
@@ -81,46 +108,75 @@ const Rates = () => {
       return;
     }
 
-    if (isEdit && editingRate) {
-      const updatedRates = rates.map(rate => 
-        rate.id === editingRate.id 
-          ? { ...rate, ...rateForm }
-          : rate
-      );
-      setRates(updatedRates);
+    try {
+      if (isEdit && editingRate) {
+        await apiClient.updateRate({ ...editingRate, ...rateForm });
+        toast({
+          title: "Rate Updated",
+          description: `${rateForm.destination} rate has been successfully updated`,
+        });
+      } else {
+        await apiClient.createRate(rateForm);
+        toast({
+          title: "Rate Created",
+          description: `${rateForm.destination} rate has been successfully created`,
+        });
+      }
+
+      setIsCreateDialogOpen(false);
+      setIsEditDialogOpen(false);
+      setEditingRate(null);
+      fetchRates(); // Refresh data
+    } catch (error) {
+      console.error('Error saving rate:', error);
       toast({
-        title: "Rate Updated",
-        description: `${rateForm.destination} rate has been successfully updated`,
-      });
-    } else {
-      const newRate: Rate = {
-        id: Date.now().toString(),
-        destination: rateForm.destination,
-        prefix: rateForm.prefix,
-        rate: rateForm.rate,
-        connection: rateForm.connection,
-        description: rateForm.description
-      };
-      setRates([...rates, newRate]);
-      toast({
-        title: "Rate Created",
-        description: `${rateForm.destination} rate has been successfully created`,
+        title: "Error",
+        description: "Failed to save rate",
+        variant: "destructive",
       });
     }
-
-    setIsCreateDialogOpen(false);
-    setIsEditDialogOpen(false);
-    setEditingRate(null);
   };
 
-  const handleDeleteRate = (rateId: string) => {
-    const updatedRates = rates.filter(rate => rate.id !== rateId);
-    setRates(updatedRates);
-    toast({
-      title: "Rate Deleted",
-      description: "Rate has been successfully deleted",
-    });
+  const handleDeleteRate = async (rateId: string) => {
+    try {
+      await apiClient.deleteRate(rateId);
+      toast({
+        title: "Rate Deleted",
+        description: "Rate has been successfully deleted",
+      });
+      fetchRates(); // Refresh data
+    } catch (error) {
+      console.error('Error deleting rate:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete rate",
+        variant: "destructive",
+      });
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Rate Management</h1>
+          <p className="text-gray-600">Loading rates from database...</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading...</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="animate-pulse space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -132,7 +188,9 @@ const Rates = () => {
       <Card>
         <CardHeader>
           <CardTitle>Rate Management</CardTitle>
-          <CardDescription>Configure call rates and pricing</CardDescription>
+          <CardDescription>
+            Configure call rates and pricing ({rates.length} rates loaded from database)
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -143,57 +201,73 @@ const Rates = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-              <Button 
-                className="bg-blue-600 hover:bg-blue-700"
-                onClick={handleCreateRate}
-              >
-                Add New Rate
-              </Button>
+              <div className="flex space-x-2">
+                <Button variant="outline" onClick={fetchRates}>
+                  Refresh
+                </Button>
+                <Button 
+                  className="bg-blue-600 hover:bg-blue-700"
+                  onClick={handleCreateRate}
+                >
+                  Add New Rate
+                </Button>
+              </div>
             </div>
-            <div className="border rounded-lg">
-              <table className="w-full">
-                <thead className="border-b bg-gray-50">
-                  <tr>
-                    <th className="text-left p-4">Destination</th>
-                    <th className="text-left p-4">Prefix</th>
-                    <th className="text-left p-4">Rate per Min</th>
-                    <th className="text-left p-4">Connection Fee</th>
-                    <th className="text-left p-4">Description</th>
-                    <th className="text-left p-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRates.map((rate) => (
-                    <tr key={rate.id} className="border-b">
-                      <td className="p-4">{rate.destination}</td>
-                      <td className="p-4 font-mono">{rate.prefix}</td>
-                      <td className="p-4">{rate.rate}</td>
-                      <td className="p-4">{rate.connection}</td>
-                      <td className="p-4 text-sm text-gray-600">{rate.description}</td>
-                      <td className="p-4">
-                        <div className="flex space-x-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleEditRate(rate)}
-                          >
-                            Edit
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => handleDeleteRate(rate.id)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                      </td>
+            
+            {filteredRates.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No rates found</p>
+                {searchTerm && <p className="text-sm">Try adjusting your search terms</p>}
+                {!searchTerm && rates.length === 0 && (
+                  <p className="text-sm">Add your first rate to get started</p>
+                )}
+              </div>
+            ) : (
+              <div className="border rounded-lg">
+                <table className="w-full">
+                  <thead className="border-b bg-gray-50">
+                    <tr>
+                      <th className="text-left p-4">Destination</th>
+                      <th className="text-left p-4">Prefix</th>
+                      <th className="text-left p-4">Rate per Min</th>
+                      <th className="text-left p-4">Connection Fee</th>
+                      <th className="text-left p-4">Description</th>
+                      <th className="text-left p-4">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredRates.map((rate) => (
+                      <tr key={rate.id} className="border-b">
+                        <td className="p-4">{rate.destination}</td>
+                        <td className="p-4 font-mono">{rate.prefix}</td>
+                        <td className="p-4">{rate.rate}</td>
+                        <td className="p-4">{rate.connection}</td>
+                        <td className="p-4 text-sm text-gray-600">{rate.description}</td>
+                        <td className="p-4">
+                          <div className="flex space-x-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleEditRate(rate)}
+                            >
+                              Edit
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleDeleteRate(rate.id)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

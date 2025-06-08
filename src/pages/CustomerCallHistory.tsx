@@ -3,23 +3,71 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { apiClient } from "@/lib/api";
 
-const DUMMY_CALL_HISTORY = [
-  { date: "2024-01-05", time: "14:32", number: "+1-555-0123", destination: "New York, USA", duration: "5:23", cost: "$0.11", status: "Completed" },
-  { date: "2024-01-05", time: "11:15", number: "+44-20-7946", destination: "London, UK", duration: "12:45", cost: "$1.91", status: "Completed" },
-  { date: "2024-01-04", time: "16:45", number: "+1-555-0456", destination: "California, USA", duration: "3:12", cost: "$0.06", status: "Completed" },
-  { date: "2024-01-04", time: "09:30", number: "+49-30-123456", destination: "Berlin, Germany", duration: "8:34", cost: "$0.68", status: "Completed" },
-  { date: "2024-01-03", time: "13:22", number: "+1-800-555-0789", destination: "Toll-Free", duration: "15:22", cost: "$0.00", status: "Completed" },
-  { date: "2024-01-03", time: "10:15", number: "+1-555-9876", destination: "Texas, USA", duration: "2:45", cost: "$0.05", status: "Failed" },
-  { date: "2024-01-02", time: "18:30", number: "+33-1-42-86", destination: "Paris, France", duration: "7:12", cost: "$0.56", status: "Completed" }
-];
+interface CallRecord {
+  date: string;
+  time: string;
+  number: string;
+  destination: string;
+  duration: string;
+  cost: string;
+  status: string;
+}
 
 const CustomerCallHistory = () => {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filteredCalls, setFilteredCalls] = useState(DUMMY_CALL_HISTORY);
+  const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalCalls, setTotalCalls] = useState(0);
+  const [totalMinutes, setTotalMinutes] = useState(0);
+  const [totalCost, setTotalCost] = useState(0);
+
+  useEffect(() => {
+    fetchCallHistory();
+  }, []);
+
+  const fetchCallHistory = async () => {
+    try {
+      console.log('Fetching call history from database...');
+      const data = await apiClient.getCDR() as any;
+      console.log('Call history data received:', data);
+      
+      const records = data.records || [];
+      
+      // Transform the data to match our interface
+      const transformedCalls = records.map((record: any) => ({
+        date: record.calldate ? record.calldate.split(' ')[0] : 'N/A',
+        time: record.calldate ? record.calldate.split(' ')[1] || 'N/A' : 'N/A',
+        number: record.dst || record.destination || 'Unknown',
+        destination: record.dcontext || record.destination || 'Unknown',
+        duration: record.billsec ? `${Math.floor(record.billsec / 60)}:${(record.billsec % 60).toString().padStart(2, '0')}` : '0:00',
+        cost: record.billsec ? `$${(record.billsec * 0.01).toFixed(2)}` : '$0.00',
+        status: record.disposition || 'Unknown'
+      }));
+      
+      setCallHistory(transformedCalls);
+      
+      // Calculate statistics
+      setTotalCalls(records.length);
+      const totalSeconds = records.reduce((sum: number, record: any) => sum + (record.billsec || 0), 0);
+      setTotalMinutes(Math.floor(totalSeconds / 60));
+      setTotalCost(Number((totalSeconds * 0.01).toFixed(2)));
+      
+    } catch (error) {
+      console.error('Error fetching call history:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load call history from database",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSearch = (value: string) => {
     setSearchTerm(value);
@@ -32,7 +80,7 @@ const CustomerCallHistory = () => {
   };
 
   const filterCalls = (search: string, date: string) => {
-    let filtered = DUMMY_CALL_HISTORY;
+    let filtered = callHistory;
 
     if (search) {
       filtered = filtered.filter(call => 
@@ -45,13 +93,21 @@ const CustomerCallHistory = () => {
       filtered = filtered.filter(call => call.date === date);
     }
 
-    setFilteredCalls(filtered);
-
     toast({
       title: "Filters Applied",
       description: `Found ${filtered.length} matching calls`,
     });
   };
+
+  const filteredCalls = callHistory.filter(call => {
+    const matchesSearch = !searchTerm || 
+      call.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      call.destination.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesDate = !filterDate || call.date === filterDate;
+    
+    return matchesSearch && matchesDate;
+  });
 
   const handleExportCalls = () => {
     toast({
@@ -75,6 +131,29 @@ const CustomerCallHistory = () => {
     });
   };
 
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Call History</h1>
+          <p className="text-gray-600">Loading call history from database...</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading...</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="animate-pulse space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -85,7 +164,9 @@ const CustomerCallHistory = () => {
       <Card>
         <CardHeader>
           <CardTitle>Call Records</CardTitle>
-          <CardDescription>Your complete call history</CardDescription>
+          <CardDescription>
+            Your complete call history ({callHistory.length} calls loaded from database)
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -103,6 +184,9 @@ const CustomerCallHistory = () => {
                   value={filterDate}
                   onChange={(e) => handleDateFilter(e.target.value)}
                 />
+                <Button variant="outline" onClick={fetchCallHistory}>
+                  Refresh
+                </Button>
                 <Button 
                   variant="outline"
                   onClick={handleExportCalls}
@@ -111,50 +195,58 @@ const CustomerCallHistory = () => {
                 </Button>
               </div>
             </div>
-            <div className="border rounded-lg">
-              <table className="w-full">
-                <thead className="border-b bg-gray-50">
-                  <tr>
-                    <th className="text-left p-4">Date</th>
-                    <th className="text-left p-4">Time</th>
-                    <th className="text-left p-4">Number</th>
-                    <th className="text-left p-4">Destination</th>
-                    <th className="text-left p-4">Duration</th>
-                    <th className="text-left p-4">Cost</th>
-                    <th className="text-left p-4">Status</th>
-                    <th className="text-left p-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCalls.map((call, index) => (
-                    <tr key={index} className="border-b">
-                      <td className="p-4">{call.date}</td>
-                      <td className="p-4">{call.time}</td>
-                      <td className="p-4 font-mono">{call.number}</td>
-                      <td className="p-4">{call.destination}</td>
-                      <td className="p-4">{call.duration}</td>
-                      <td className="p-4 font-semibold">{call.cost}</td>
-                      <td className="p-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          call.status === "Completed" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                        }`}>
-                          {call.status}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleCallDetails(call.number)}
-                        >
-                          Details
-                        </Button>
-                      </td>
+            
+            {filteredCalls.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No call records found</p>
+                {searchTerm || filterDate ? <p className="text-sm">Try adjusting your search or date filter</p> : <p className="text-sm">No calls have been made yet</p>}
+              </div>
+            ) : (
+              <div className="border rounded-lg">
+                <table className="w-full">
+                  <thead className="border-b bg-gray-50">
+                    <tr>
+                      <th className="text-left p-4">Date</th>
+                      <th className="text-left p-4">Time</th>
+                      <th className="text-left p-4">Number</th>
+                      <th className="text-left p-4">Destination</th>
+                      <th className="text-left p-4">Duration</th>
+                      <th className="text-left p-4">Cost</th>
+                      <th className="text-left p-4">Status</th>
+                      <th className="text-left p-4">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredCalls.map((call, index) => (
+                      <tr key={index} className="border-b">
+                        <td className="p-4">{call.date}</td>
+                        <td className="p-4">{call.time}</td>
+                        <td className="p-4 font-mono">{call.number}</td>
+                        <td className="p-4">{call.destination}</td>
+                        <td className="p-4">{call.duration}</td>
+                        <td className="p-4 font-semibold">{call.cost}</td>
+                        <td className="p-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            call.status === "ANSWERED" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                          }`}>
+                            {call.status}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleCallDetails(call.number)}
+                          >
+                            Details
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -162,11 +254,11 @@ const CustomerCallHistory = () => {
       <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>This Month</CardTitle>
+            <CardTitle>Total Calls</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">47 calls</div>
-            <p className="text-sm text-gray-600">245 minutes total</p>
+            <div className="text-2xl font-bold">{totalCalls} calls</div>
+            <p className="text-sm text-gray-600">{totalMinutes} minutes total</p>
           </CardContent>
         </Card>
 
@@ -175,8 +267,8 @@ const CustomerCallHistory = () => {
             <CardTitle>Total Cost</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">$12.25</div>
-            <p className="text-sm text-gray-600">This month charges</p>
+            <div className="text-2xl font-bold text-green-600">${totalCost.toFixed(2)}</div>
+            <p className="text-sm text-gray-600">Total charges</p>
           </CardContent>
         </Card>
 
@@ -185,7 +277,9 @@ const CustomerCallHistory = () => {
             <CardTitle>Success Rate</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">95.7%</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {totalCalls > 0 ? ((callHistory.filter(call => call.status === 'ANSWERED').length / totalCalls) * 100).toFixed(1) : 0}%
+            </div>
             <p className="text-sm text-gray-600">Call completion rate</p>
           </CardContent>
         </Card>

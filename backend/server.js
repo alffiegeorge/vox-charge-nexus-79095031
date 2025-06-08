@@ -401,6 +401,215 @@ app.get('/dashboard/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Rate Management routes
+app.get('/rates', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const [rates] = await db.execute('SELECT * FROM rates ORDER BY created_at DESC');
+    res.json(rates);
+  } catch (error) {
+    console.error('Error fetching rates:', error);
+    res.status(500).json({ error: 'Failed to fetch rates' });
+  }
+});
+
+app.post('/rates', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { destination, prefix, rate, connection, description } = req.body;
+
+    await db.execute(
+      'INSERT INTO rates (destination, prefix, rate, connection_fee, description) VALUES (?, ?, ?, ?, ?)',
+      [destination, prefix, rate, connection, description]
+    );
+
+    res.status(201).json({ message: 'Rate created successfully' });
+  } catch (error) {
+    console.error('Error creating rate:', error);
+    res.status(500).json({ error: 'Failed to create rate' });
+  }
+});
+
+app.put('/rates/:id', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { id } = req.params;
+    const { destination, prefix, rate, connection, description } = req.body;
+
+    await db.execute(
+      'UPDATE rates SET destination = ?, prefix = ?, rate = ?, connection_fee = ?, description = ? WHERE id = ?',
+      [destination, prefix, rate, connection, description, id]
+    );
+
+    res.json({ message: 'Rate updated successfully' });
+  } catch (error) {
+    console.error('Error updating rate:', error);
+    res.status(500).json({ error: 'Failed to update rate' });
+  }
+});
+
+app.delete('/rates/:id', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { id } = req.params;
+    await db.execute('DELETE FROM rates WHERE id = ?', [id]);
+
+    res.json({ message: 'Rate deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting rate:', error);
+    res.status(500).json({ error: 'Failed to delete rate' });
+  }
+});
+
+// Call Quality routes
+app.get('/call-quality', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { page = 1, limit = 50, date } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = 'SELECT * FROM cdr WHERE disposition IS NOT NULL';
+    let params = [];
+
+    if (date) {
+      query += ' AND DATE(calldate) = ?';
+      params.push(date);
+    }
+
+    query += ' ORDER BY calldate DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+
+    const [records] = await db.execute(query, params);
+    res.json({ records });
+  } catch (error) {
+    console.error('Error fetching call quality data:', error);
+    res.status(500).json({ error: 'Failed to fetch call quality data' });
+  }
+});
+
+// SMS Management routes
+app.get('/sms', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { page = 1, limit = 50, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = 'SELECT * FROM sms_history';
+    let params = [];
+
+    if (search) {
+      query += ' WHERE phone_number LIKE ? OR message LIKE ?';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+
+    const [records] = await db.execute(query, params);
+    res.json({ records });
+  } catch (error) {
+    console.error('Error fetching SMS history:', error);
+    res.status(500).json({ error: 'Failed to fetch SMS history' });
+  }
+});
+
+app.post('/sms/send', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { recipients, message, schedule } = req.body;
+
+    for (const recipient of recipients) {
+      await db.execute(
+        'INSERT INTO sms_history (phone_number, message, status, cost, scheduled_at) VALUES (?, ?, ?, ?, ?)',
+        [recipient, message, schedule ? 'Scheduled' : 'Sent', 0.05, schedule]
+      );
+    }
+
+    res.status(201).json({ message: 'SMS sent successfully' });
+  } catch (error) {
+    console.error('Error sending SMS:', error);
+    res.status(500).json({ error: 'Failed to send SMS' });
+  }
+});
+
+app.get('/sms/templates', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const [templates] = await db.execute('SELECT * FROM sms_templates ORDER BY created_at DESC');
+    res.json(templates);
+  } catch (error) {
+    console.error('Error fetching SMS templates:', error);
+    res.status(500).json({ error: 'Failed to fetch SMS templates' });
+  }
+});
+
+app.post('/sms/templates', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { title, message, category } = req.body;
+
+    await db.execute(
+      'INSERT INTO sms_templates (title, message, category) VALUES (?, ?, ?)',
+      [title, message, category]
+    );
+
+    res.status(201).json({ message: 'SMS template created successfully' });
+  } catch (error) {
+    console.error('Error creating SMS template:', error);
+    res.status(500).json({ error: 'Failed to create SMS template' });
+  }
+});
+
+app.get('/sms/stats', authenticateToken, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const [sentResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history');
+    const [deliveredResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history WHERE status = "Delivered"');
+    const [failedResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history WHERE status = "Failed"');
+    const [costResult] = await db.execute('SELECT SUM(cost) as total FROM sms_history');
+
+    res.json({
+      sent: sentResult[0].count,
+      delivered: deliveredResult[0].count,
+      failed: failedResult[0].count,
+      cost: costResult[0].total || 0
+    });
+  } catch (error) {
+    console.error('Error fetching SMS stats:', error);
+    res.status(500).json({ error: 'Failed to fetch SMS stats' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

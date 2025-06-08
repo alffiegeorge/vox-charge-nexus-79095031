@@ -1,4 +1,3 @@
-
 const API_BASE_URL = '/api';
 
 export interface LoginCredentials {
@@ -178,6 +177,75 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ customerId, amount }),
     });
+  }
+
+  // Rate Management
+  async getRates() {
+    return this.request('/rates');
+  }
+
+  async createRate(rate: any) {
+    return this.request('/rates', {
+      method: 'POST',
+      body: JSON.stringify(rate),
+    });
+  }
+
+  async updateRate(rate: any) {
+    return this.request(`/rates/${rate.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(rate),
+    });
+  }
+
+  async deleteRate(rateId: string) {
+    return this.request(`/rates/${rateId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Call Quality Management
+  async getCallQuality(params?: { page?: number; limit?: number; date?: string }) {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.date) queryParams.append('date', params.date);
+    
+    const query = queryParams.toString();
+    return this.request(`/call-quality${query ? `?${query}` : ''}`);
+  }
+
+  // SMS Management
+  async getSMSHistory(params?: { page?: number; limit?: number; search?: string }) {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    
+    const query = queryParams.toString();
+    return this.request(`/sms${query ? `?${query}` : ''}`);
+  }
+
+  async sendSMS(smsData: any) {
+    return this.request('/sms/send', {
+      method: 'POST',
+      body: JSON.stringify(smsData),
+    });
+  }
+
+  async getSMSTemplates() {
+    return this.request('/sms/templates');
+  }
+
+  async createSMSTemplate(template: any) {
+    return this.request('/sms/templates', {
+      method: 'POST',
+      body: JSON.stringify(template),
+    });
+  }
+
+  async getSMSStats() {
+    return this.request('/sms/stats');
   }
 
   logout() {
