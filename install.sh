@@ -12,8 +12,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# ... keep existing code (utility functions) the same ...
-
 # Utility functions
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -70,8 +68,6 @@ backup_file() {
         print_status "Backed up: $file_path"
     fi
 }
-
-# ... keep existing code (check_and_setup_sudo function) the same ...
 
 check_and_setup_sudo() {
     print_status "Checking sudo access..."
@@ -197,6 +193,8 @@ CREATE TABLE IF NOT EXISTS customers (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- ... keep existing code (all other table definitions) the same ...
 
 CREATE TABLE IF NOT EXISTS rates (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -622,12 +620,13 @@ EOF
         print_status "✓ MariaDB root password reset successfully"
     fi
 
-    print_status "Creating Asterisk database and user..."
+    print_status "Dropping and recreating Asterisk database completely..."
     
-    # Drop and recreate the asterisk user to ensure clean setup
+    # Drop and recreate the database completely
     mysql -u root -p"${mysql_root_password}" <<EOF
+DROP DATABASE IF EXISTS asterisk;
 DROP USER IF EXISTS 'asterisk'@'localhost';
-CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
@@ -639,83 +638,11 @@ EOF
         print_status "✓ Asterisk user database connection successful"
     else
         print_error "✗ Asterisk user database connection failed"
-        
-        # Try to fix potential issues
-        print_status "Attempting to fix database connection issues..."
-        mysql -u root -p"${mysql_root_password}" <<EOF
-DROP USER IF EXISTS 'asterisk'@'localhost';
-CREATE USER 'asterisk'@'localhost' IDENTIFIED WITH mysql_native_password BY '${asterisk_db_password}';
-GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
-FLUSH PRIVILEGES;
-EOF
-        
-        # Test again
-        if mysql -u asterisk -p"${asterisk_db_password}" -e "USE asterisk; SELECT 1;" >/dev/null 2>&1; then
-            print_status "✓ Asterisk user database connection fixed"
-        else
-            print_error "✗ Failed to establish asterisk user database connection"
-            print_status "Database credentials that will be used:"
-            print_status "User: asterisk"
-            print_status "Password: ${asterisk_db_password}"
-            print_status "Database: asterisk"
-        fi
+        exit 1
     fi
 
     print_status "Creating ALL database tables from complete schema..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
-    
-    # Add missing columns to existing customers table if they don't exist (for existing installations)
-    print_status "Ensuring customers table has all required columns..."
-    mysql -u root -p"${mysql_root_password}" asterisk <<EOF
--- Check and add qr_code_enabled column if missing
-SET @column_exists = (
-    SELECT COUNT(*) 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = 'asterisk' 
-    AND TABLE_NAME = 'customers' 
-    AND COLUMN_NAME = 'qr_code_enabled'
-);
-
-SET @sql = IF(@column_exists = 0, 
-    'ALTER TABLE customers ADD COLUMN qr_code_enabled BOOLEAN DEFAULT FALSE AFTER notes', 
-    'SELECT "Column qr_code_enabled already exists" as message'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Check and add qr_code_data column if missing
-SET @column_exists = (
-    SELECT COUNT(*) 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = 'asterisk' 
-    AND TABLE_NAME = 'customers' 
-    AND COLUMN_NAME = 'qr_code_data'
-);
-
-SET @sql = IF(@column_exists = 0, 
-    'ALTER TABLE customers ADD COLUMN qr_code_data TEXT DEFAULT NULL AFTER qr_code_enabled', 
-    'SELECT "Column qr_code_data already exists" as message'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-EOF
-    
-    print_status "Verifying customers table structure..."
-    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_check.txt
-    
-    if grep -q "qr_code_enabled" /tmp/customers_check.txt; then
-        print_status "✓ Customers table now has qr_code_enabled column"
-    else
-        print_error "✗ Failed to add qr_code_enabled column to customers table"
-        cat /tmp/customers_check.txt
-        exit 1
-    fi
-    
-    rm -f /tmp/customers_check.txt
     
     # Create default admin user with proper password hash
     print_status "Creating default admin user..."
@@ -752,7 +679,20 @@ EOF
         print_status "✓ All required tables created successfully"
     fi
     
-    rm -f /tmp/table_list.txt
+    # Verify customers table has qr_code_enabled column
+    print_status "Verifying customers table structure..."
+    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_check.txt
+    
+    if grep -q "qr_code_enabled" /tmp/customers_check.txt; then
+        print_status "✓ Customers table has qr_code_enabled column"
+    else
+        print_error "✗ Customers table missing qr_code_enabled column"
+        print_status "Table structure:"
+        cat /tmp/customers_check.txt
+        exit 1
+    fi
+    
+    rm -f /tmp/table_list.txt /tmp/customers_check.txt
     print_status "Database setup completed successfully"
 }
 
@@ -1128,8 +1068,6 @@ perform_system_checks() {
         return 1
     fi
 }
-
-# ... keep existing code (display_installation_summary function and main function) the same ...
 
 display_installation_summary() {
     local mysql_root_password=$1
