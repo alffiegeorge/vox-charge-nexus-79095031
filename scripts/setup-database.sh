@@ -32,9 +32,18 @@ GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
-    # Create database tables
+    # Create database tables - use the fix-database-schema script
     print_status "Creating database tables..."
-    sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/../config/database-schema.sql"
+    if [ -f "$(dirname "$0")/fix-database-schema.sh" ]; then
+        # Use the comprehensive schema from fix-database-schema.sh
+        echo "${mysql_root_password}" | "$(dirname "$0")/fix-database-schema.sh"
+    else
+        print_warning "fix-database-schema.sh not found, using basic schema"
+        # Fallback to basic schema if available
+        if [ -f "$(dirname "$0")/../config/database-schema.sql" ]; then
+            sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/../config/database-schema.sql"
+        fi
+    fi
     
     print_status "Database setup completed successfully"
 }

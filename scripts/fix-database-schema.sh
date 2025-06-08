@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # Fix database schema - create all missing tables
@@ -8,8 +7,14 @@ fix_database_schema() {
     print_status "Fixing database schema - creating all missing tables..."
     
     # Get database credentials
-    echo "Enter MySQL root password:"
-    read -s mysql_root_password
+    if [ -t 0 ]; then
+        # Interactive mode
+        echo "Enter MySQL root password:"
+        read -s mysql_root_password
+    else
+        # Non-interactive mode (piped input)
+        read -s mysql_root_password
+    fi
     
     if [ -z "$mysql_root_password" ]; then
         print_error "MySQL root password required"
@@ -67,6 +72,48 @@ CREATE TABLE IF NOT EXISTS sipusers (
     regseconds INT(11) DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY name (name)
+);
+
+-- CDR table for call detail records
+CREATE TABLE IF NOT EXISTS cdr (
+    calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
+    clid VARCHAR(80) NOT NULL DEFAULT '',
+    src VARCHAR(80) NOT NULL DEFAULT '',
+    dst VARCHAR(80) NOT NULL DEFAULT '',
+    dcontext VARCHAR(80) NOT NULL DEFAULT '',
+    channel VARCHAR(80) NOT NULL DEFAULT '',
+    dstchannel VARCHAR(80) NOT NULL DEFAULT '',
+    lastapp VARCHAR(80) NOT NULL DEFAULT '',
+    lastdata VARCHAR(80) NOT NULL DEFAULT '',
+    duration INT(11) NOT NULL DEFAULT 0,
+    billsec INT(11) NOT NULL DEFAULT 0,
+    disposition VARCHAR(45) NOT NULL DEFAULT '',
+    amaflags INT(11) NOT NULL DEFAULT 0,
+    accountcode VARCHAR(20) NOT NULL DEFAULT '',
+    uniqueid VARCHAR(32) NOT NULL DEFAULT '',
+    userfield VARCHAR(255) NOT NULL DEFAULT '',
+    INDEX calldate_idx (calldate),
+    INDEX src_idx (src),
+    INDEX dst_idx (dst),
+    INDEX accountcode_idx (accountcode)
+);
+
+-- Customers table
+CREATE TABLE IF NOT EXISTS customers (
+    id VARCHAR(20) NOT NULL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    phone VARCHAR(20) DEFAULT NULL,
+    address TEXT DEFAULT NULL,
+    type ENUM('Prepaid', 'Postpaid') NOT NULL DEFAULT 'Prepaid',
+    balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    credit_limit DECIMAL(10,2) DEFAULT NULL,
+    status ENUM('Active', 'Inactive', 'Suspended') NOT NULL DEFAULT 'Active',
+    qr_code_enabled BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX type_idx (type),
+    INDEX status_idx (status)
 );
 
 -- Rates table
