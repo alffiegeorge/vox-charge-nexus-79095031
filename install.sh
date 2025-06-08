@@ -6,8 +6,6 @@
 # Exit on error
 set -e
 
-# ... keep existing code (colors, utility functions) the same ...
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -666,6 +664,59 @@ EOF
     print_status "Creating ALL database tables from complete schema..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
     
+    # Add missing columns to existing customers table if they don't exist (for existing installations)
+    print_status "Ensuring customers table has all required columns..."
+    mysql -u root -p"${mysql_root_password}" asterisk <<EOF
+-- Check and add qr_code_enabled column if missing
+SET @column_exists = (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'asterisk' 
+    AND TABLE_NAME = 'customers' 
+    AND COLUMN_NAME = 'qr_code_enabled'
+);
+
+SET @sql = IF(@column_exists = 0, 
+    'ALTER TABLE customers ADD COLUMN qr_code_enabled BOOLEAN DEFAULT FALSE AFTER notes', 
+    'SELECT "Column qr_code_enabled already exists" as message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Check and add qr_code_data column if missing
+SET @column_exists = (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'asterisk' 
+    AND TABLE_NAME = 'customers' 
+    AND COLUMN_NAME = 'qr_code_data'
+);
+
+SET @sql = IF(@column_exists = 0, 
+    'ALTER TABLE customers ADD COLUMN qr_code_data TEXT DEFAULT NULL AFTER qr_code_enabled', 
+    'SELECT "Column qr_code_data already exists" as message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+EOF
+    
+    print_status "Verifying customers table structure..."
+    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_check.txt
+    
+    if grep -q "qr_code_enabled" /tmp/customers_check.txt; then
+        print_status "✓ Customers table now has qr_code_enabled column"
+    else
+        print_error "✗ Failed to add qr_code_enabled column to customers table"
+        cat /tmp/customers_check.txt
+        exit 1
+    fi
+    
+    rm -f /tmp/customers_check.txt
+    
     # Create default admin user with proper password hash
     print_status "Creating default admin user..."
     # Generate bcrypt hash for admin123
@@ -701,20 +752,7 @@ EOF
         print_status "✓ All required tables created successfully"
     fi
     
-    # Verify customers table structure
-    print_status "Verifying customers table structure..."
-    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_structure.txt
-    
-    if grep -q "qr_code_enabled" /tmp/customers_structure.txt; then
-        print_status "✓ Customers table has correct structure with qr_code_enabled column"
-    else
-        print_error "✗ Customers table missing qr_code_enabled column"
-        print_status "Table structure:"
-        cat /tmp/customers_structure.txt
-        exit 1
-    fi
-    
-    rm -f /tmp/table_list.txt /tmp/customers_structure.txt
+    rm -f /tmp/table_list.txt
     print_status "Database setup completed successfully"
 }
 
