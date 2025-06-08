@@ -6,10 +6,62 @@
 # Exit on error
 set -e
 
+# Check if running as root
+if [[ $EUID -eq 0 ]]; then
+   echo -e "\033[0;31m[ERROR]\033[0m This script should not be run as root for security reasons"
+   echo -e "\033[0;32m[INFO]\033[0m Please run as a regular user. The script will ask for sudo when needed."
+   exit 1
+fi
+
 # Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source utility functions
+# Check if scripts directory exists, if not, clone the repository
+if [ ! -d "${SCRIPT_DIR}/scripts" ]; then
+    echo -e "\033[0;32m[INFO]\033[0m Scripts directory not found. Cloning iBilling repository..."
+    
+    # Install git if not present
+    if ! command -v git >/dev/null 2>&1; then
+        echo -e "\033[0;32m[INFO]\033[0m Installing git..."
+        sudo apt update && sudo apt install -y git
+    fi
+    
+    # Clone the repository to a temporary location
+    TEMP_DIR="/tmp/ibilling-$(date +%s)"
+    git clone https://github.com/your-repo/ibilling.git "$TEMP_DIR" || {
+        echo -e "\033[0;31m[ERROR]\033[0m Failed to clone repository"
+        echo -e "\033[0;32m[INFO]\033[0m Please ensure you have the correct repository URL"
+        echo -e "\033[0;32m[INFO]\033[0m Or manually download the scripts directory to: ${SCRIPT_DIR}/scripts"
+        exit 1
+    }
+    
+    # Copy scripts to current directory
+    if [ -d "$TEMP_DIR/scripts" ]; then
+        cp -r "$TEMP_DIR/scripts" "$SCRIPT_DIR/"
+        echo -e "\033[0;32m[INFO]\033[0m Scripts copied successfully"
+    else
+        echo -e "\033[0;31m[ERROR]\033[0m Scripts directory not found in repository"
+        exit 1
+    fi
+    
+    # Copy other necessary files
+    for file in config etc opt; do
+        if [ -d "$TEMP_DIR/$file" ]; then
+            cp -r "$TEMP_DIR/$file" "$SCRIPT_DIR/"
+        fi
+    done
+    
+    # Cleanup
+    rm -rf "$TEMP_DIR"
+fi
+
+# Now source utility functions
+if [ ! -f "${SCRIPT_DIR}/scripts/utils.sh" ]; then
+    echo -e "\033[0;31m[ERROR]\033[0m utils.sh not found in scripts directory"
+    echo -e "\033[0;32m[INFO]\033[0m Please ensure the scripts directory contains all necessary files"
+    exit 1
+fi
+
 source "${SCRIPT_DIR}/scripts/utils.sh"
 
 # Make all scripts executable
@@ -100,17 +152,10 @@ install_system_dependencies() {
 
 # Main installation function
 main() {
-    # Check if running as root
-    if [[ $EUID -eq 0 ]]; then
-       print_error "This script should not be run as root for security reasons"
-       print_status "Please run as a regular user. The script will ask for sudo when needed."
-       exit 1
-    fi
+    print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
     # Check and setup sudo access
     check_and_setup_sudo
-
-    print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
     # 1. Create directory structure
     print_status "Creating directory structure..."
