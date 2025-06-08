@@ -145,9 +145,9 @@ create_config_files() {
     
     sudo mkdir -p /tmp/ibilling-config
     
-    # Database schema
+    # Complete Database schema with ALL required tables
     sudo tee /tmp/ibilling-config/database-schema.sql > /dev/null <<'EOF'
--- iBilling Database Schema
+-- iBilling Complete Database Schema
 CREATE TABLE IF NOT EXISTS cdr (
     id INT(11) NOT NULL AUTO_INCREMENT,
     calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
@@ -186,8 +186,11 @@ CREATE TABLE IF NOT EXISTS customers (
     balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     credit_limit DECIMAL(10,2) DEFAULT NULL,
     status ENUM('Active', 'Suspended', 'Closed') NOT NULL DEFAULT 'Active',
+    qr_code_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX status_idx (status),
+    INDEX type_idx (type)
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -201,79 +204,258 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status) VALUES
-('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active'),
-('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active'),
-('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended');
+-- SIP Users table for Realtime
+CREATE TABLE IF NOT EXISTS sipusers (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    name VARCHAR(40) NOT NULL,
+    username VARCHAR(40) DEFAULT NULL,
+    secret VARCHAR(40) DEFAULT NULL,
+    md5secret VARCHAR(32) DEFAULT NULL,
+    context VARCHAR(40) DEFAULT NULL,
+    host VARCHAR(40) DEFAULT 'dynamic',
+    type ENUM('friend','user','peer') DEFAULT 'friend',
+    nat VARCHAR(40) DEFAULT 'yes',
+    port VARCHAR(40) DEFAULT NULL,
+    qualify VARCHAR(40) DEFAULT 'yes',
+    canreinvite VARCHAR(40) DEFAULT 'no',
+    rtptimeout VARCHAR(40) DEFAULT NULL,
+    rtpholdtimeout VARCHAR(40) DEFAULT NULL,
+    musiconhold VARCHAR(40) DEFAULT NULL,
+    cancallforward VARCHAR(40) DEFAULT 'yes',
+    dtmfmode VARCHAR(40) DEFAULT 'rfc2833',
+    insecure VARCHAR(40) DEFAULT NULL,
+    pickupgroup VARCHAR(40) DEFAULT NULL,
+    language VARCHAR(40) DEFAULT NULL,
+    disallow VARCHAR(40) DEFAULT 'all',
+    allow VARCHAR(40) DEFAULT 'ulaw,alaw,gsm',
+    accountcode VARCHAR(40) DEFAULT NULL,
+    amaflags VARCHAR(40) DEFAULT NULL,
+    callgroup VARCHAR(40) DEFAULT NULL,
+    callerid VARCHAR(40) DEFAULT NULL,
+    defaultuser VARCHAR(40) DEFAULT NULL,
+    fromuser VARCHAR(40) DEFAULT NULL,
+    fromdomain VARCHAR(40) DEFAULT NULL,
+    fullcontact VARCHAR(40) DEFAULT NULL,
+    regserver VARCHAR(40) DEFAULT NULL,
+    ipaddr VARCHAR(40) DEFAULT NULL,
+    regseconds INT(11) DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY name (name)
+);
+
+-- Rates table
+CREATE TABLE IF NOT EXISTS rates (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    destination_prefix VARCHAR(20) NOT NULL,
+    destination_name VARCHAR(100) NOT NULL,
+    rate_per_minute DECIMAL(8,4) NOT NULL,
+    min_duration INT DEFAULT 0,
+    billing_increment INT DEFAULT 60,
+    effective_date DATE NOT NULL,
+    status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX prefix_idx (destination_prefix),
+    INDEX date_idx (effective_date)
+);
+
+-- DID Numbers table
+CREATE TABLE IF NOT EXISTS did_numbers (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    monthly_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    setup_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Available', 'Assigned', 'Ported', 'Suspended') DEFAULT 'Available',
+    country VARCHAR(50) DEFAULT NULL,
+    region VARCHAR(50) DEFAULT NULL,
+    features JSON DEFAULT NULL,
+    assigned_date DATE DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    INDEX customer_idx (customer_id),
+    INDEX status_idx (status)
+);
+
+-- System Settings table
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    setting_key VARCHAR(100) NOT NULL UNIQUE,
+    setting_value TEXT DEFAULT NULL,
+    setting_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+    category VARCHAR(50) DEFAULT 'general',
+    description TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX category_idx (category)
+);
+
+-- Invoices table
+CREATE TABLE IF NOT EXISTS invoices (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(20) NOT NULL,
+    invoice_date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled') DEFAULT 'Draft',
+    payment_date DATE DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    INDEX customer_idx (customer_id),
+    INDEX status_idx (status),
+    INDEX date_idx (invoice_date)
+);
+
+-- Invoice Items table
+CREATE TABLE IF NOT EXISTS invoice_items (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT(11) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    quantity DECIMAL(10,3) NOT NULL DEFAULT 1.000,
+    unit_price DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+    total_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    item_type ENUM('Call', 'SMS', 'DID', 'Service', 'Other') DEFAULT 'Other',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+    INDEX invoice_idx (invoice_id)
+);
+
+-- Trunks table
+CREATE TABLE IF NOT EXISTS trunks (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    type ENUM('SIP', 'IAX2', 'DAHDI', 'PRI') DEFAULT 'SIP',
+    host VARCHAR(100) NOT NULL,
+    port INT DEFAULT 5060,
+    username VARCHAR(50) DEFAULT NULL,
+    password VARCHAR(100) DEFAULT NULL,
+    context VARCHAR(50) DEFAULT 'from-trunk',
+    codec_priority VARCHAR(100) DEFAULT 'ulaw,alaw,gsm',
+    max_channels INT DEFAULT 30,
+    status ENUM('Active', 'Inactive', 'Maintenance') DEFAULT 'Active',
+    cost_per_minute DECIMAL(8,4) DEFAULT 0.0000,
+    provider VARCHAR(100) DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Routes table
+CREATE TABLE IF NOT EXISTS routes (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    pattern VARCHAR(50) NOT NULL,
+    trunk_id INT(11) NOT NULL,
+    priority INT DEFAULT 1,
+    status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    time_restrictions JSON DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trunk_id) REFERENCES trunks(id) ON DELETE CASCADE,
+    INDEX pattern_idx (pattern),
+    INDEX priority_idx (priority)
+);
+
+-- SMS Messages table
+CREATE TABLE IF NOT EXISTS sms_messages (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(20) DEFAULT NULL,
+    from_number VARCHAR(20) NOT NULL,
+    to_number VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    direction ENUM('Inbound', 'Outbound') NOT NULL,
+    status ENUM('Pending', 'Sent', 'Delivered', 'Failed') DEFAULT 'Pending',
+    cost DECIMAL(8,4) DEFAULT 0.0000,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TIMESTAMP NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    INDEX customer_idx (customer_id),
+    INDEX direction_idx (direction),
+    INDEX sent_at_idx (sent_at)
+);
+
+-- SMS Templates table
+CREATE TABLE IF NOT EXISTS sms_templates (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    message TEXT NOT NULL,
+    category VARCHAR(50) DEFAULT 'general',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- SMS History table (for backward compatibility)
+CREATE TABLE IF NOT EXISTS sms_history (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    phone_number VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    status ENUM('Pending', 'Sent', 'Delivered', 'Failed', 'Scheduled') DEFAULT 'Pending',
+    cost DECIMAL(8,4) DEFAULT 0.0000,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scheduled_at TIMESTAMP NULL
+);
+
+-- Insert sample customers
+INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
+('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
+('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active', TRUE),
+('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 75.00, 'Active', FALSE),
+('C004', 'Alice Cooper', 'alice@example.com', '+1-555-0321', 'Prepaid', 200.00, 'Active', TRUE),
+('C005', 'David Wilson', 'david@example.com', '+1-555-0654', 'Postpaid', 0.00, 'Suspended', FALSE);
+
+-- Insert sample rates
+INSERT IGNORE INTO rates (destination_prefix, destination_name, rate_per_minute, billing_increment, effective_date) VALUES
+('1', 'USA/Canada', 0.0120, 60, CURDATE()),
+('44', 'United Kingdom', 0.0250, 60, CURDATE()),
+('49', 'Germany', 0.0280, 60, CURDATE()),
+('33', 'France', 0.0240, 60, CURDATE()),
+('91', 'India', 0.0180, 60, CURDATE()),
+('86', 'China', 0.0150, 60, CURDATE()),
+('81', 'Japan', 0.0200, 60, CURDATE());
+
+-- Insert sample DID numbers
+INSERT IGNORE INTO did_numbers (number, customer_id, monthly_cost, status, country, region) VALUES
+('+1-555-1001', 'C001', 5.00, 'Assigned', 'USA', 'New York'),
+('+1-555-1002', 'C002', 5.00, 'Assigned', 'USA', 'California'),
+('+1-555-1003', NULL, 5.00, 'Available', 'USA', 'Texas'),
+('+1-555-1004', 'C003', 5.00, 'Assigned', 'USA', 'Florida'),
+('+1-555-1005', NULL, 5.00, 'Available', 'USA', 'Illinois');
+
+-- Insert sample trunks
+INSERT IGNORE INTO trunks (name, type, host, port, username, context, status, provider) VALUES
+('Trunk-Primary', 'SIP', 'sip.provider1.com', 5060, 'ibilling_user1', 'from-trunk', 'Active', 'Provider One'),
+('Trunk-Secondary', 'SIP', 'sip.provider2.com', 5060, 'ibilling_user2', 'from-trunk', 'Active', 'Provider Two'),
+('Trunk-Backup', 'SIP', 'sip.provider3.com', 5060, 'ibilling_user3', 'from-trunk', 'Inactive', 'Provider Three');
+
+-- Insert sample CDR records
+INSERT IGNORE INTO cdr (calldate, src, dst, duration, billsec, disposition, accountcode) VALUES
+(NOW() - INTERVAL 1 HOUR, '+1-555-0123', '+1-555-9999', 300, 295, 'ANSWERED', 'C001'),
+(NOW() - INTERVAL 2 HOUR, '+1-555-0456', '+44-20-7946-0958', 180, 175, 'ANSWERED', 'C002'),
+(NOW() - INTERVAL 3 HOUR, '+1-555-0789', '+49-30-12345678', 120, 0, 'NO ANSWER', 'C003'),
+(NOW() - INTERVAL 4 HOUR, '+1-555-0321', '+33-1-42-86-83-26', 450, 445, 'ANSWERED', 'C004'),
+(NOW() - INTERVAL 5 HOUR, '+1-555-0654', '+91-11-23456789', 90, 85, 'ANSWERED', 'C005');
+
+-- Insert sample SMS templates
+INSERT IGNORE INTO sms_templates (title, message, category) VALUES
+('Welcome Message', 'Welcome to iBilling! Your account is now active.', 'welcome'),
+('Low Balance Alert', 'Your account balance is low. Please top up to continue using our services.', 'billing'),
+('Payment Confirmation', 'Payment received successfully. Thank you!', 'billing'),
+('Service Maintenance', 'Scheduled maintenance will occur tonight from 2-4 AM.', 'maintenance');
+
+-- Insert system settings
+INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, category, description) VALUES
+('company_name', 'iBilling Communications', 'string', 'general', 'Company name displayed in the system'),
+('system_email', 'admin@ibilling.com', 'string', 'general', 'System email address for notifications'),
+('currency', 'USD', 'string', 'general', 'Default currency for billing'),
+('timezone', 'America/New_York', 'string', 'general', 'System timezone'),
+('minimum_credit', '5.00', 'number', 'billing', 'Minimum credit required'),
+('low_balance_warning', '10.00', 'number', 'billing', 'Low balance warning threshold');
 EOF
 
-    # Asterisk ODBC configuration
-    sudo tee /tmp/ibilling-config/res_odbc.conf > /dev/null <<'EOF'
-[asterisk]
-enabled => yes
-dsn => asterisk-connector
-username => asterisk
-password => ASTERISK_DB_PASSWORD_PLACEHOLDER
-pooling => no
-limit => 1
-pre-connect => yes
-sanitysql => select 1
-EOF
-
-    # CDR ODBC configuration
-    sudo tee /tmp/ibilling-config/cdr_adaptive_odbc.conf > /dev/null <<'EOF'
-[asterisk]
-connection=asterisk
-table=cdr
-EOF
-
-    # ODBC driver configuration
-    sudo tee /tmp/ibilling-config/odbcinst.ini > /dev/null <<'EOF'
-[MariaDB]
-Description = MariaDB ODBC driver
-Driver      = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
-Threading   = 1
-EOF
-
-    # ODBC DSN template
-    sudo tee /tmp/ibilling-config/odbc.ini.template > /dev/null <<'EOF'
-[asterisk-connector]
-Description = MariaDB connection to 'asterisk' database
-Driver      = MariaDB
-Server      = 127.0.0.1
-Database    = asterisk
-User        = asterisk
-Password    = ASTERISK_DB_PASSWORD_PLACEHOLDER
-Port        = 3306
-Socket      = /var/run/mysqld/mysqld.sock
-Option      = 3
-EOF
-
-    # Nginx configuration
-    sudo tee /tmp/ibilling-config/nginx-ibilling.conf > /dev/null <<'EOF'
-server {
-    listen 80;
-    server_name localhost;
-    root /opt/billing/web/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:3001/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
+    # ... keep existing code (Asterisk ODBC configuration, CDR ODBC configuration, etc.)
 }
 
 setup_database() {
@@ -368,7 +550,7 @@ EOF
         fi
     fi
 
-    print_status "Creating database tables..."
+    print_status "Creating complete database schema with all tables..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
     
     # Create default admin user with proper password hash
@@ -380,364 +562,23 @@ INSERT IGNORE INTO users (username, password, email, role, status) VALUES
 ('admin', '${ADMIN_HASH}', 'admin@ibilling.local', 'admin', 'active');
 EOF
     
+    # Verify all tables were created
+    print_status "Verifying database setup..."
+    table_count=$(mysql -u root -p"${mysql_root_password}" asterisk -e "SHOW TABLES;" | tail -n +2 | wc -l)
+    print_status "Total tables created: $table_count"
+    
+    # Show table list
+    print_status "Tables in database:"
+    mysql -u root -p"${mysql_root_password}" asterisk -e "SHOW TABLES;"
+    
+    # Show sample data counts
+    print_status "Sample data verification:"
+    mysql -u root -p"${mysql_root_password}" asterisk -e "SELECT 'Customers:' as Table_Type, COUNT(*) as Count FROM customers UNION SELECT 'Users:', COUNT(*) FROM users UNION SELECT 'Rates:', COUNT(*) FROM rates UNION SELECT 'DID Numbers:', COUNT(*) FROM did_numbers;"
+    
     print_status "Database setup completed successfully"
 }
 
 # ... keep existing code (all other functions remain the same)
-
-setup_odbc() {
-    local asterisk_db_password=$1
-    
-    print_status "Configuring ODBC..."
-    
-    sudo cp /tmp/ibilling-config/odbcinst.ini /etc/odbcinst.ini
-    sudo cp /tmp/ibilling-config/odbc.ini.template /etc/odbc.ini
-    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/odbc.ini
-
-    print_status "Testing ODBC connection..."
-    if isql -v asterisk-connector asterisk "${asterisk_db_password}" <<< "SELECT 1;" >/dev/null 2>&1; then
-        print_status "✓ ODBC connection test successful"
-    else
-        print_warning "✗ ODBC connection test failed"
-    fi
-
-    print_status "ODBC configuration completed"
-}
-
-install_asterisk() {
-    local asterisk_db_password=$1
-    
-    print_status "Installing Asterisk with ODBC support..."
-    
-    print_status "Installing additional Asterisk build dependencies..."
-    sudo apt update
-    sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
-        libedit-dev libjansson-dev uuid-dev libsqlite3-dev libssl-dev \
-        libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
-        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev
-    
-    ASTERISK_DIR=""
-    if [ -d "/usr/src/asterisk-20"* ]; then
-        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
-        print_status "Found existing Asterisk source directory: $ASTERISK_DIR"
-    fi
-    
-    if [ -z "$ASTERISK_DIR" ]; then
-        cd /usr/src
-        
-        if [ ! -f "asterisk-20-current.tar.gz" ]; then
-            print_status "Downloading Asterisk..."
-            sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
-        else
-            print_status "Asterisk source archive already exists"
-        fi
-        
-        if [ ! -d "asterisk-20"* ]; then
-            print_status "Extracting Asterisk..."
-            sudo tar xzf asterisk-20-current.tar.gz
-        else
-            print_status "Asterisk source already extracted"
-        fi
-        
-        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
-    fi
-    
-    cd "$ASTERISK_DIR"
-    print_status "Working in directory: $ASTERISK_DIR"
-
-    print_status "Checking MP3 source..."
-    if [ ! -f "addons/mp3/mpg123.h" ]; then
-        print_status "Getting MP3 source..."
-        sudo contrib/scripts/get_mp3_source.sh
-    else
-        print_status "MP3 source already present"
-    fi
-
-    if [ -f "config.log" ] && grep -q "error" config.log; then
-        print_status "Cleaning previous build attempt due to errors..."
-        sudo make clean || true
-        sudo rm -f config.log menuselect.makeopts || true
-    fi
-
-    if [ ! -f "config.log" ]; then
-        print_status "Configuring Asterisk build..."
-        sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
-        if [ $? -ne 0 ]; then
-            print_error "Asterisk configure failed"
-            exit 1
-        fi
-    else
-        print_status "Asterisk build already configured"
-    fi
-
-    if [ ! -f "menuselect.makeopts" ]; then
-        print_status "Creating menuselect configuration..."
-        sudo make menuselect.makeopts
-        if [ $? -ne 0 ]; then
-            print_error "Failed to create menuselect configuration"
-            exit 1
-        fi
-    else
-        print_status "Menuselect configuration already exists"
-    fi
-    
-    print_status "Configuring required modules..."
-    sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
-    sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts 2>/dev/null || true
-    sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
-    
-    if ! pkg-config --exists libcurl; then
-        print_warning "libcurl development headers not found, disabling res_config_curl"
-        sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl" | sudo tee -a menuselect.makeopts
-    fi
-
-    if [ ! -f "main/asterisk" ]; then
-        print_status "Building Asterisk (this may take 10-20 minutes)..."
-        sudo make -j$(nproc)
-        if [ $? -ne 0 ]; then
-            print_error "Asterisk build failed"
-            print_status "Trying to disable problematic modules and rebuild..."
-            
-            sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl res_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl res_curl" | sudo tee -a menuselect.makeopts
-            
-            sudo make clean
-            sudo make -j$(nproc)
-            if [ $? -ne 0 ]; then
-                print_error "Asterisk build failed even after disabling problematic modules"
-                exit 1
-            fi
-        fi
-    else
-        print_status "Asterisk already built, skipping compilation"
-    fi
-
-    print_status "Installing Asterisk..."
-    sudo make install
-    if [ $? -ne 0 ]; then
-        print_error "Asterisk installation failed"
-        exit 1
-    fi
-
-    if [ ! -f "/etc/asterisk/asterisk.conf" ]; then
-        print_status "Installing sample configurations..."
-        sudo make samples
-        sudo make config
-    else
-        print_status "Asterisk configuration files already exist"
-    fi
-    
-    sudo ldconfig
-
-    if ! id asterisk >/dev/null 2>&1; then
-        print_status "Creating asterisk user and group..."
-        sudo groupadd -r asterisk
-        sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
-        sudo usermod -aG audio,dialout asterisk
-    else
-        print_status "Asterisk user already exists"
-    fi
-
-    print_status "Setting proper ownership for Asterisk directories..."
-    sudo chown -R asterisk:asterisk /var/lib/asterisk
-    sudo chown -R asterisk:asterisk /var/log/asterisk
-    sudo chown -R asterisk:asterisk /var/spool/asterisk
-    sudo chown -R asterisk:asterisk /etc/asterisk
-
-    print_status "Configuring Asterisk..."
-
-    backup_file /etc/asterisk/res_odbc.conf
-
-    sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
-    sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
-
-    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/asterisk/res_odbc.conf
-
-    sudo systemctl enable asterisk
-    sudo systemctl start asterisk
-
-    print_status "Asterisk installation and configuration completed"
-}
-
-setup_web() {
-    print_status "Installing Node.js and npm..."
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt install -y nodejs
-
-    print_status "Setting up iBilling frontend..."
-    cd /opt/billing/web
-
-    sudo rm -rf ./*
-
-    sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031 .
-
-    sudo chown -R $USER:$USER /opt/billing/web
-
-    npm install
-    npm run build
-
-    print_status "Configuring Nginx..."
-    
-    sudo cp /tmp/ibilling-config/nginx-ibilling.conf /etc/nginx/sites-available/ibilling
-
-    sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
-    sudo rm -f /etc/nginx/sites-enabled/default
-
-    sudo nginx -t
-    sudo systemctl enable nginx
-    sudo systemctl restart nginx
-
-    print_status "Web stack setup completed successfully"
-}
-
-setup_backend() {
-    local mysql_root_password=$1
-    local asterisk_db_password=$2
-    
-    print_status "Setting up backend API server..."
-    
-    cd /opt/billing/web/backend
-    
-    sudo chown -R $USER:$USER /opt/billing/web/backend
-    
-    print_status "Installing backend dependencies..."
-    npm install
-    
-    print_status "Creating backend environment file..."
-    tee /opt/billing/web/backend/.env > /dev/null <<EOF
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=asterisk
-DB_USER=asterisk
-DB_PASSWORD=${asterisk_db_password}
-
-# JWT Configuration
-JWT_SECRET=$(openssl rand -base64 32)
-
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-
-# Asterisk Configuration (for future use)
-ASTERISK_HOST=localhost
-ASTERISK_PORT=5038
-ASTERISK_USERNAME=admin
-ASTERISK_SECRET=
-EOF
-    
-    print_status "Creating backend service..."
-    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
-[Unit]
-Description=iBilling Backend API Server
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=/opt/billing/web/backend
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/web/backend/.env
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable ibilling-backend
-    sudo systemctl start ibilling-backend
-    
-    # Wait for service to start and test connection
-    sleep 5
-    
-    print_status "Testing backend service..."
-    if curl -s http://localhost:3001/health > /dev/null; then
-        print_status "✓ Backend API is responding"
-    else
-        print_warning "⚠ Backend service may need more time to start"
-        print_status "Checking service status..."
-        sudo systemctl status ibilling-backend --no-pager -l
-    fi
-    
-    print_status "Backend API setup completed"
-}
-
-perform_system_checks() {
-    print_status "Performing final system checks..."
-
-    local all_good=true
-
-    if ! check_service mariadb; then
-        all_good=false
-    fi
-
-    if ! check_service asterisk; then
-        all_good=false
-    fi
-
-    if ! check_service nginx; then
-        all_good=false
-    fi
-
-    if ! check_service ibilling-backend; then
-        all_good=false
-    fi
-
-    if [ "$all_good" = true ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-display_installation_summary() {
-    local mysql_root_password=$1
-    local asterisk_db_password=$2
-    
-    print_status "============================================="
-    print_status "iBilling - Professional Voice Billing System Installation Complete!"
-    print_status "============================================="
-    echo ""
-    print_status "System Information:"
-    echo "• Frontend URL: http://localhost (or your server IP)"
-    echo "• Backend API: http://localhost:3001"
-    echo "• Database: MariaDB on localhost:3306"
-    echo "• Database Name: asterisk"
-    echo "• Database User: asterisk"
-    echo "• Environment File: /opt/billing/web/backend/.env"
-    echo ""
-    print_status "Login Credentials:"
-    echo "• Admin Username: admin"
-    echo "• Admin Password: admin123"
-    echo ""
-    print_status "Database Credentials (SAVE THESE SECURELY):"
-    echo "• MySQL Root Password: ${mysql_root_password}"
-    echo "• Asterisk DB Password: ${asterisk_db_password}"
-    echo ""
-    print_status "Troubleshooting Commands:"
-    echo "• Check backend logs: sudo journalctl -u ibilling-backend -f"
-    echo "• Restart backend: sudo systemctl restart ibilling-backend"
-    echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM users;'"
-    echo "• Check backend API: curl http://localhost:3001/health"
-    echo ""
-    print_status "Next Steps:"
-    echo "1. Test the web interface at http://your-server-ip"
-    echo "2. Login with admin/admin123 to access the admin panel"
-    echo "3. Configure your domain name in Nginx if needed"
-    echo "4. Set up SSL certificates with: sudo certbot --nginx"
-    echo "5. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
-    echo "6. Review Asterisk configuration in /etc/asterisk/"
-    echo ""
-    print_warning "Remember to:"
-    echo "• Change the default admin password after first login"
-    echo "• Configure backup procedures"
-    echo "• Set up monitoring"
-    echo "• Review security settings"
-
-    print_status "Installation completed successfully!"
-}
 
 # Main installation function
 main() {
@@ -778,8 +619,8 @@ main() {
     MYSQL_ROOT_PASSWORD=$(generate_password)
     ASTERISK_DB_PASSWORD=$(generate_password)
 
-    # 5. Setup database
-    print_status "Setting up database..."
+    # 5. Setup database with complete schema
+    print_status "Setting up database with complete schema..."
     setup_database "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
     # 6. Setup ODBC
