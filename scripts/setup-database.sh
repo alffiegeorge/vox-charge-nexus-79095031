@@ -2,7 +2,8 @@
 #!/bin/bash
 
 # Database setup script for iBilling
-source "$(dirname "$0")/utils.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/utils.sh"
 
 setup_database() {
     local mysql_root_password=$1
@@ -34,14 +35,14 @@ EOF
 
     # Create database tables - use the fix-database-schema script
     print_status "Creating database tables..."
-    if [ -f "$(dirname "$0")/fix-database-schema.sh" ]; then
+    if [ -f "${SCRIPT_DIR}/fix-database-schema.sh" ]; then
         # Use the comprehensive schema from fix-database-schema.sh
-        echo "${mysql_root_password}" | "$(dirname "$0")/fix-database-schema.sh"
+        echo "${mysql_root_password}" | "${SCRIPT_DIR}/fix-database-schema.sh"
     else
         print_warning "fix-database-schema.sh not found, using basic schema"
         # Fallback to basic schema if available
-        if [ -f "$(dirname "$0")/../config/database-schema.sql" ]; then
-            sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/../config/database-schema.sql"
+        if [ -f "${SCRIPT_DIR}/../config/database-schema.sql" ]; then
+            sudo mysql -u root -p"${mysql_root_password}" asterisk < "${SCRIPT_DIR}/../config/database-schema.sql"
         fi
     fi
     
