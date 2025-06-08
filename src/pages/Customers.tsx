@@ -40,9 +40,17 @@ const Customers = () => {
 
   const fetchCustomers = async () => {
     try {
-      console.log('Fetching customers from database...');
+      console.log('Starting to fetch customers...');
+      console.log('Making API request to fetch customers from database...');
+      
+      // Add explicit logging before the API call
+      const authToken = localStorage.getItem('authToken');
+      console.log('Auth token exists:', !!authToken);
+      console.log('API call URL will be: /api/customers');
+      
       const data = await apiClient.getCustomers() as any[];
-      console.log('Customers data received:', data);
+      console.log('API response received successfully:', data);
+      console.log('Number of customers returned:', data?.length || 0);
       
       // Transform the data to match our interface
       const transformedCustomers = data.map((customer: any) => ({
@@ -62,15 +70,21 @@ const Customers = () => {
         qrCodeData: customer.qr_code_data || `voiceflow://login?token=${customer.id.toLowerCase()}${Math.random().toString(36).substring(2, 6)}&server=demo.voiceflow.com&expires=${Date.now() + (24 * 60 * 60 * 1000)}`
       }));
       
+      console.log('Transformed customers:', transformedCustomers);
       setCustomers(transformedCustomers);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      console.error('ERROR in fetchCustomers:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      
       toast({
         title: "Error",
-        description: "Failed to load customers from database",
+        description: `Failed to load customers: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive",
       });
     } finally {
+      console.log('Setting loading to false');
       setLoading(false);
     }
   };

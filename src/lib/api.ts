@@ -1,3 +1,4 @@
+
 const API_BASE_URL = '/api';
 
 export interface LoginCredentials {
@@ -31,17 +32,33 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    const fullUrl = `${API_BASE_URL}${endpoint}`;
+    console.log(`API Request: ${options.method || 'GET'} ${fullUrl}`);
+    console.log('Request headers:', headers);
+    console.log('Auth token exists:', !!token);
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Network error' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+    try {
+      const response = await fetch(fullUrl, {
+        ...options,
+        headers,
+      });
+
+      console.log(`API Response: ${response.status} ${response.statusText}`);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Network error' }));
+        console.error('API Error response:', error);
+        throw new Error(error.error || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('API Response data:', data);
+      return data;
+    } catch (fetchError) {
+      console.error('API Fetch error:', fetchError);
+      throw fetchError;
     }
-
-    return response.json();
   }
 
   async login(credentials: LoginCredentials): Promise<LoginResponse> {
@@ -60,6 +77,7 @@ export class ApiClient {
   }
 
   async getCustomers() {
+    console.log('ApiClient.getCustomers() called');
     return this.request('/customers');
   }
 
