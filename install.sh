@@ -145,9 +145,9 @@ create_config_files() {
     
     sudo mkdir -p /tmp/ibilling-config
     
-    # Complete database schema with ALL tables
+    # Complete database schema with ALL tables and proper column definitions
     sudo tee /tmp/ibilling-config/database-schema.sql > /dev/null <<'EOF'
--- iBilling Complete Database Schema
+-- iBilling Complete Database Schema with ALL required tables
 CREATE TABLE IF NOT EXISTS cdr (
     id INT(11) NOT NULL AUTO_INCREMENT,
     calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
@@ -481,7 +481,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Insert basic sample data
+-- Insert basic sample data with proper column names
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
 ('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active', TRUE),
@@ -494,6 +494,8 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('timezone', 'Pacific/Efate', 'string', 'general', 'System timezone');
 EOF
 
+    # ... keep existing code (other configuration files) the same ...
+    
     # Asterisk ODBC configuration
     sudo tee /tmp/ibilling-config/res_odbc.conf > /dev/null <<'EOF'
 [asterisk]
@@ -667,7 +669,7 @@ INSERT IGNORE INTO users (username, password, email, role, status) VALUES
 ('admin', '${ADMIN_HASH}', 'admin@ibilling.local', 'admin', 'active');
 EOF
     
-    # Verify all required tables exist
+    # Verify all required tables exist with proper structure
     print_status "Verifying database schema..."
     mysql -u root -p"${mysql_root_password}" asterisk -e "SHOW TABLES;" > /tmp/table_list.txt
     
@@ -693,7 +695,20 @@ EOF
         print_status "✓ All required tables created successfully"
     fi
     
-    rm -f /tmp/table_list.txt
+    # Verify customers table structure
+    print_status "Verifying customers table structure..."
+    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_structure.txt
+    
+    if grep -q "qr_code_enabled" /tmp/customers_structure.txt; then
+        print_status "✓ Customers table has correct structure with qr_code_enabled column"
+    else
+        print_error "✗ Customers table missing qr_code_enabled column"
+        print_status "Table structure:"
+        cat /tmp/customers_structure.txt
+        exit 1
+    fi
+    
+    rm -f /tmp/table_list.txt /tmp/customers_structure.txt
     print_status "Database setup completed successfully"
 }
 
@@ -1010,7 +1025,7 @@ populate_database() {
         print_error "Cannot populate database - missing tables: ${MISSING_TABLES[*]}"
         print_status "Running database schema fix script..."
         if [ -f "scripts/fix-database-schema.sh" ]; then
-            ./scripts/fix-database-schema.sh "${mysql_root_password}"
+            echo "${mysql_root_password}" | ./scripts/fix-database-schema.sh
         else
             print_error "Database fix script not found!"
             exit 1
@@ -1024,19 +1039,19 @@ populate_database() {
     # Run database schema update script
     if [ -f "scripts/update-database-schema.sh" ]; then
         print_status "Updating database schema..."
-        ./scripts/update-database-schema.sh "${mysql_root_password}"
+        echo "${mysql_root_password}" | ./scripts/update-database-schema.sh
     fi
     
     # Run sample data population script
     if [ -f "scripts/populate-sample-data.sh" ]; then
         print_status "Populating sample data..."
-        ./scripts/populate-sample-data.sh "${mysql_root_password}"
+        echo "${mysql_root_password}" | ./scripts/populate-sample-data.sh
     fi
     
     # Verify database population
     if [ -f "scripts/verify-database-population.sh" ]; then
         print_status "Verifying database population..."
-        ./scripts/verify-database-population.sh "${mysql_root_password}"
+        echo "${mysql_root_password}" | ./scripts/verify-database-population.sh
     fi
     
     print_status "Database population completed successfully"
@@ -1169,7 +1184,7 @@ main() {
     MYSQL_ROOT_PASSWORD=$(generate_password)
     ASTERISK_DB_PASSWORD=$(generate_password)
 
-    # 5. Setup database with complete schema
+    # 5. Setup database with complete schema - THIS MUST BE DONE FIRST
     print_status "Setting up database with complete schema..."
     setup_database "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
