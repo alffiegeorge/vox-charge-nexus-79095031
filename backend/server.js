@@ -1,3 +1,4 @@
+
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
@@ -14,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection with fallback values
+// Database connection with enhanced configuration
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: process.env.DB_PORT || 3306,
@@ -24,42 +25,89 @@ const dbConfig = {
   connectionLimit: 10,
   acquireTimeout: 60000,
   timeout: 60000,
-  reconnect: true
+  reconnect: true,
+  idleTimeout: 300000,
+  maxIdle: 10,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0
 };
 
 let db;
 
-async function initializeDatabase() {
+async function createDatabasePool() {
   try {
-    console.log('Attempting to connect to database...');
+    console.log('Creating database connection pool...');
     console.log(`Host: ${dbConfig.host}:${dbConfig.port}`);
     console.log(`Database: ${dbConfig.database}`);
     console.log(`User: ${dbConfig.user}`);
     
     db = mysql.createPool(dbConfig);
-    console.log('✓ Database pool created');
     
-    // Test connection
+    // Test the connection
     const connection = await db.getConnection();
     await connection.ping();
     connection.release();
-    console.log('✓ Database connection test successful');
+    console.log('✓ Database pool created and tested successfully');
     
+    // Handle pool events
+    db.pool.on('connection', function (connection) {
+      console.log('New database connection established as id ' + connection.threadId);
+    });
+
+    db.pool.on('error', function(err) {
+      console.error('Database pool error:', err);
+      if(err.code === 'PROTOCOL_CONNECTION_LOST') {
+        console.log('Attempting to reconnect to database...');
+        setTimeout(createDatabasePool, 2000);
+      }
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('✗ Database pool creation failed:', error.message);
+    console.error('Please check your database configuration and ensure MySQL is running');
+    return false;
+  }
+}
+
+async function initializeDatabase() {
+  const success = await createDatabasePool();
+  if (success) {
     // Create users table if it doesn't exist
     await createUsersTable();
+  }
+}
+
+async function executeQuery(query, params = []) {
+  let connection;
+  try {
+    if (!db) {
+      throw new Error('Database pool not available');
+    }
     
+    connection = await db.getConnection();
+    const result = await connection.execute(query, params);
+    connection.release();
+    return result;
   } catch (error) {
-    console.error('✗ Database connection failed:', error.message);
-    console.error('Please check your database configuration and ensure MySQL is running');
-    // Don't exit the process, allow the server to start without DB for debugging
-    console.log('Server will start without database connection for debugging');
+    if (connection) connection.release();
+    
+    // Handle connection errors
+    if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST' || error.code === 'ER_ACCESS_DENIED_ERROR') {
+      console.error('Database connection error:', error.message);
+      console.log('Attempting to recreate database pool...');
+      await createDatabasePool();
+      throw new Error('Database connection failed. Please try again.');
+    }
+    
+    throw error;
   }
 }
 
 async function createUsersTable() {
   try {
     console.log('Creating/checking users table...');
-    await db.execute(`
+    await executeQuery(`
       CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) NOT NULL UNIQUE,
@@ -77,14 +125,14 @@ async function createUsersTable() {
     console.log('Recreating admin user with fresh password hash...');
     
     // Delete existing admin user
-    await db.execute('DELETE FROM users WHERE username = ?', ['admin']);
+    await executeQuery('DELETE FROM users WHERE username = ?', ['admin']);
     console.log('✓ Removed existing admin user');
     
     // Create new admin user with fresh bcrypt hash
     const hashedPassword = await bcrypt.hash('admin123', 10);
     console.log('✓ Generated fresh admin password hash');
     
-    await db.execute(
+    await executeQuery(
       'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
       ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
     );
@@ -95,14 +143,14 @@ async function createUsersTable() {
     console.log('✓ Password hash test result:', testValid);
     
     // Check if customer user exists, if not create it
-    const [existingCustomer] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['customer']);
+    const [existingCustomer] = await executeQuery('SELECT COUNT(*) as count FROM users WHERE username = ?', ['customer']);
     console.log('Customer user check result:', existingCustomer[0]);
     
     if (existingCustomer[0].count === 0) {
       console.log('Creating default customer user...');
       const customerHashedPassword = await bcrypt.hash('customer123', 10);
       console.log('Customer password hash generated successfully');
-      await db.execute(
+      await executeQuery(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
         ['customer', customerHashedPassword, 'customer@ibilling.local', 'customer', 'active']
       );
@@ -112,7 +160,7 @@ async function createUsersTable() {
     }
     
     // Let's also verify the users are in the database
-    const [allUsers] = await db.execute('SELECT id, username, role, status FROM users');
+    const [allUsers] = await executeQuery('SELECT id, username, role, status FROM users');
     console.log('All users in database:', allUsers);
     
     console.log('✓ Users table ready');
@@ -181,7 +229,7 @@ app.post('/auth/login', async (req, res) => {
     // Database query with proper error handling
     let users;
     try {
-      [users] = await db.execute(
+      [users] = await executeQuery(
         'SELECT id, username, password, email, role, status FROM users WHERE username = ?',
         [username]
       );
@@ -284,7 +332,7 @@ app.get('/customers', authenticateToken, async (req, res) => {
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    const [customers] = await db.execute('SELECT * FROM customers ORDER BY created_at DESC');
+    const [customers] = await executeQuery('SELECT * FROM customers ORDER BY created_at DESC');
     res.json(customers);
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -300,7 +348,7 @@ app.post('/customers', authenticateToken, async (req, res) => {
 
     const { id, name, email, phone, company, type, balance, credit_limit, status } = req.body;
 
-    await db.execute(
+    await executeQuery(
       'INSERT INTO customers (id, name, email, phone, company, type, balance, credit_limit, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [id, name, email, phone, company, type, balance || 0, credit_limit, status || 'Active']
     );
