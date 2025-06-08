@@ -74,6 +74,112 @@ export class ApiClient {
     return this.request(`/cdr${query ? `?${query}` : ''}`);
   }
 
+  // DID Management
+  async getDIDs() {
+    return this.request('/dids');
+  }
+
+  async createDID(did: any) {
+    return this.request('/dids', {
+      method: 'POST',
+      body: JSON.stringify(did),
+    });
+  }
+
+  async updateDID(did: any) {
+    return this.request(`/dids/${did.number}`, {
+      method: 'PUT',
+      body: JSON.stringify(did),
+    });
+  }
+
+  // Trunk Management
+  async getTrunks() {
+    return this.request('/trunks');
+  }
+
+  async createTrunk(trunk: any) {
+    return this.request('/trunks', {
+      method: 'POST',
+      body: JSON.stringify(trunk),
+    });
+  }
+
+  async updateTrunk(trunk: any) {
+    return this.request(`/trunks/${trunk.name}`, {
+      method: 'PUT',
+      body: JSON.stringify(trunk),
+    });
+  }
+
+  // Route Management
+  async getRoutes() {
+    return this.request('/routes');
+  }
+
+  async createRoute(route: any) {
+    return this.request('/routes', {
+      method: 'POST',
+      body: JSON.stringify(route),
+    });
+  }
+
+  async updateRoute(route: any) {
+    return this.request(`/routes/${route.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(route),
+    });
+  }
+
+  // Invoice Management
+  async getAllInvoices() {
+    return this.request('/invoices');
+  }
+
+  async getCustomerInvoices() {
+    return this.request('/invoices/customer');
+  }
+
+  async createInvoice(invoice: any) {
+    return this.request('/invoices', {
+      method: 'POST',
+      body: JSON.stringify(invoice),
+    });
+  }
+
+  // Billing Plans
+  async getBillingPlans() {
+    return this.request('/billing/plans');
+  }
+
+  async createBillingPlan(plan: any) {
+    return this.request('/billing/plans', {
+      method: 'POST',
+      body: JSON.stringify(plan),
+    });
+  }
+
+  async updateBillingPlan(plan: any) {
+    return this.request(`/billing/plans/${plan.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(plan),
+    });
+  }
+
+  async deleteBillingPlan(planId: string) {
+    return this.request(`/billing/plans/${planId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Credit refill
+  async processRefill(customerId: string, amount: number) {
+    return this.request('/billing/refill', {
+      method: 'POST',
+      body: JSON.stringify({ customerId, amount }),
+    });
+  }
+
   logout() {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userRole');

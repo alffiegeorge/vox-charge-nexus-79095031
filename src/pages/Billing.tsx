@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { apiClient } from "@/lib/api";
 
 interface Plan {
   id: string;
@@ -16,15 +16,10 @@ interface Plan {
   features: string[];
 }
 
-const DUMMY_PLANS: Plan[] = [
-  { id: "1", name: "Basic Plan", price: "$10/month", minutes: "500 mins", features: ["Local calls", "Basic support"] },
-  { id: "2", name: "Standard Plan", price: "$25/month", minutes: "1500 mins", features: ["Local + International", "Email support", "Call forwarding"] },
-  { id: "3", name: "Premium Plan", price: "$50/month", minutes: "Unlimited", features: ["All destinations", "24/7 support", "Advanced features", "Priority routing"] }
-];
-
 const Billing = () => {
   const { toast } = useToast();
-  const [plans, setPlans] = useState<Plan[]>(DUMMY_PLANS);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
@@ -41,7 +36,39 @@ const Billing = () => {
     features: ""
   });
 
-  const handleProcessRefill = () => {
+  useEffect(() => {
+    fetchPlans();
+  }, []);
+
+  const fetchPlans = async () => {
+    try {
+      console.log('Fetching billing plans from database...');
+      const data = await apiClient.getBillingPlans() as any[];
+      console.log('Billing plans data received:', data);
+      
+      // Transform the data to match our interface
+      const transformedPlans = data.map((plan: any) => ({
+        id: plan.id,
+        name: plan.name,
+        price: plan.price ? `$${plan.price}/month` : "$0/month",
+        minutes: plan.minutes || "0 mins",
+        features: plan.features ? (Array.isArray(plan.features) ? plan.features : plan.features.split(',')) : []
+      }));
+      
+      setPlans(transformedPlans);
+    } catch (error) {
+      console.error('Error fetching billing plans:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load billing plans from database",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleProcessRefill = async () => {
     if (!customerId || !refillAmount) {
       toast({
         title: "Error",
@@ -51,14 +78,23 @@ const Billing = () => {
       return;
     }
 
-    // Simulate processing
-    toast({
-      title: "Refill Processed",
-      description: `Successfully added $${refillAmount} credit to customer ${customerId}`,
-    });
-    
-    setCustomerId("");
-    setRefillAmount("");
+    try {
+      await apiClient.processRefill(customerId, parseFloat(refillAmount));
+      toast({
+        title: "Refill Processed",
+        description: `Successfully added $${refillAmount} credit to customer ${customerId}`,
+      });
+      
+      setCustomerId("");
+      setRefillAmount("");
+    } catch (error) {
+      console.error('Error processing refill:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process credit refill",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleEditPlan = (plan: Plan) => {
@@ -82,7 +118,7 @@ const Billing = () => {
     setIsCreateDialogOpen(true);
   };
 
-  const handleSavePlan = (isEdit: boolean) => {
+  const handleSavePlan = async (isEdit: boolean) => {
     if (!planForm.name || !planForm.price || !planForm.minutes) {
       toast({
         title: "Error",
@@ -94,45 +130,83 @@ const Billing = () => {
 
     const features = planForm.features.split(",").map(f => f.trim()).filter(f => f);
     
-    if (isEdit && editingPlan) {
-      const updatedPlans = plans.map(plan => 
-        plan.id === editingPlan.id 
-          ? { ...plan, ...planForm, features }
-          : plan
-      );
-      setPlans(updatedPlans);
+    try {
+      if (isEdit && editingPlan) {
+        const updatedPlan = { ...editingPlan, ...planForm, features };
+        await apiClient.updateBillingPlan(updatedPlan);
+        toast({
+          title: "Plan Updated",
+          description: `${planForm.name} has been successfully updated`,
+        });
+      } else {
+        const newPlan = {
+          id: Date.now().toString(),
+          name: planForm.name,
+          price: planForm.price,
+          minutes: planForm.minutes,
+          features
+        };
+        await apiClient.createBillingPlan(newPlan);
+        toast({
+          title: "Plan Created",
+          description: `${planForm.name} has been successfully created`,
+        });
+      }
+
+      setIsEditDialogOpen(false);
+      setIsCreateDialogOpen(false);
+      setEditingPlan(null);
+      fetchPlans(); // Refresh from database
+    } catch (error) {
+      console.error('Error saving plan:', error);
       toast({
-        title: "Plan Updated",
-        description: `${planForm.name} has been successfully updated`,
-      });
-    } else {
-      const newPlan: Plan = {
-        id: Date.now().toString(),
-        name: planForm.name,
-        price: planForm.price,
-        minutes: planForm.minutes,
-        features
-      };
-      setPlans([...plans, newPlan]);
-      toast({
-        title: "Plan Created",
-        description: `${planForm.name} has been successfully created`,
+        title: "Error",
+        description: "Failed to save billing plan",
+        variant: "destructive",
       });
     }
-
-    setIsEditDialogOpen(false);
-    setIsCreateDialogOpen(false);
-    setEditingPlan(null);
   };
 
-  const handleDeletePlan = (planId: string) => {
-    const updatedPlans = plans.filter(plan => plan.id !== planId);
-    setPlans(updatedPlans);
-    toast({
-      title: "Plan Deleted",
-      description: "Plan has been successfully deleted",
-    });
+  const handleDeletePlan = async (planId: string) => {
+    try {
+      await apiClient.deleteBillingPlan(planId);
+      toast({
+        title: "Plan Deleted",
+        description: "Plan has been successfully deleted",
+      });
+      fetchPlans(); // Refresh from database
+    } catch (error) {
+      console.error('Error deleting plan:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete billing plan",
+        variant: "destructive",
+      });
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Billing Management</h1>
+          <p className="text-gray-600">Loading billing data from database...</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading...</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="animate-pulse space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -177,7 +251,9 @@ const Billing = () => {
         <Card>
           <CardHeader>
             <CardTitle>Plan Management</CardTitle>
-            <CardDescription>Manage billing plans and packages</CardDescription>
+            <CardDescription>
+              Manage billing plans and packages ({plans.length} plans loaded from database)
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -205,9 +281,14 @@ const Billing = () => {
                   </div>
                 ))}
               </div>
-              <Button className="w-full mt-4" variant="outline" onClick={handleCreatePlan}>
-                Create New Plan
-              </Button>
+              <div className="flex space-x-2">
+                <Button className="flex-1" variant="outline" onClick={handleCreatePlan}>
+                  Create New Plan
+                </Button>
+                <Button variant="outline" onClick={fetchPlans}>
+                  Refresh
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

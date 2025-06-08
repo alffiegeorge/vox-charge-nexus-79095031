@@ -1,18 +1,112 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Download, Send, Eye } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
-const DUMMY_INVOICES = [
-  { id: "INV-2024-001", customer: "TechCorp Ltd", amount: "$1,245.50", date: "2024-01-01", due: "2024-01-31", status: "Paid" },
-  { id: "INV-2024-002", customer: "Global Communications", amount: "$2,890.75", date: "2024-01-01", due: "2024-01-31", status: "Pending" },
-  { id: "INV-2024-003", customer: "StartUp Inc", amount: "$567.25", date: "2024-01-01", due: "2024-01-31", status: "Overdue" },
-  { id: "INV-2024-004", customer: "Enterprise Solutions", amount: "$4,123.00", date: "2024-01-01", due: "2024-01-31", status: "Draft" }
-];
+interface Invoice {
+  id: string;
+  customer: string;
+  amount: string;
+  date: string;
+  due: string;
+  status: string;
+}
 
 const InvoiceManagement = () => {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [totalInvoiced, setTotalInvoiced] = useState("$0.00");
+  const [paidInvoices, setPaidInvoices] = useState("$0.00");
+  const [pendingPayment, setPendingPayment] = useState("$0.00");
+  const [overdue, setOverdue] = useState("$0.00");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
+  const fetchInvoices = async () => {
+    try {
+      console.log('Fetching invoices from database...');
+      const data = await apiClient.getAllInvoices() as any[];
+      console.log('Invoices data received:', data);
+      
+      // Transform the data to match our interface
+      const transformedInvoices = data.map((invoice: any) => ({
+        id: invoice.id || invoice.invoice_id,
+        customer: invoice.customer_name || invoice.customer || "Unknown Customer",
+        amount: invoice.amount ? `$${invoice.amount.toFixed(2)}` : "$0.00",
+        date: invoice.date || invoice.created_at,
+        due: invoice.due_date || invoice.due,
+        status: invoice.status
+      }));
+      
+      setInvoices(transformedInvoices);
+
+      // Calculate totals
+      const total = data.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+      const paid = data.filter((inv: any) => inv.status === 'Paid').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+      const pending = data.filter((inv: any) => inv.status === 'Pending').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+      const overdueAmount = data.filter((inv: any) => inv.status === 'Overdue').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+
+      setTotalInvoiced(`$${total.toFixed(2)}`);
+      setPaidInvoices(`$${paid.toFixed(2)}`);
+      setPendingPayment(`$${pending.toFixed(2)}`);
+      setOverdue(`$${overdueAmount.toFixed(2)}`);
+      
+    } catch (error) {
+      console.error('Error fetching invoices:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load invoices from database",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredInvoices = invoices.filter(invoice =>
+    invoice.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    invoice.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    invoice.status.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleGenerateInvoice = () => {
+    toast({
+      title: "Invoice Generation",
+      description: "Opening invoice generation wizard...",
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Invoice Management</h1>
+          <p className="text-gray-600">Loading invoices from database...</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading...</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="animate-pulse space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -26,8 +120,8 @@ const InvoiceManagement = () => {
             <CardTitle>Total Invoiced</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">$8,826.50</div>
-            <p className="text-sm text-gray-600">This month</p>
+            <div className="text-3xl font-bold text-blue-600">{totalInvoiced}</div>
+            <p className="text-sm text-gray-600">All time</p>
           </CardContent>
         </Card>
 
@@ -36,8 +130,8 @@ const InvoiceManagement = () => {
             <CardTitle>Paid Invoices</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-green-600">$1,245.50</div>
-            <p className="text-sm text-gray-600">14% of total</p>
+            <div className="text-3xl font-bold text-green-600">{paidInvoices}</div>
+            <p className="text-sm text-gray-600">Total collected</p>
           </CardContent>
         </Card>
 
@@ -46,8 +140,8 @@ const InvoiceManagement = () => {
             <CardTitle>Pending Payment</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-orange-600">$2,890.75</div>
-            <p className="text-sm text-gray-600">33% of total</p>
+            <div className="text-3xl font-bold text-orange-600">{pendingPayment}</div>
+            <p className="text-sm text-gray-600">Awaiting payment</p>
           </CardContent>
         </Card>
 
@@ -56,8 +150,8 @@ const InvoiceManagement = () => {
             <CardTitle>Overdue</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-red-600">$567.25</div>
-            <p className="text-sm text-gray-600">6% of total</p>
+            <div className="text-3xl font-bold text-red-600">{overdue}</div>
+            <p className="text-sm text-gray-600">Past due date</p>
           </CardContent>
         </Card>
       </div>
@@ -65,15 +159,27 @@ const InvoiceManagement = () => {
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>Invoice List</CardTitle>
-          <CardDescription>Manage and track all customer invoices</CardDescription>
+          <CardDescription>
+            Manage and track all customer invoices ({invoices.length} invoices loaded from database)
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input placeholder="Search invoices..." className="max-w-sm" />
+              <Input 
+                placeholder="Search invoices..." 
+                className="max-w-sm" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
               <div className="flex space-x-2">
+                <Button variant="outline" onClick={fetchInvoices}>
+                  Refresh
+                </Button>
                 <Button variant="outline">Bulk Actions</Button>
-                <Button className="bg-blue-600 hover:bg-blue-700">Generate Invoice</Button>
+                <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleGenerateInvoice}>
+                  Generate Invoice
+                </Button>
               </div>
             </div>
             <div className="border rounded-lg">
@@ -90,38 +196,46 @@ const InvoiceManagement = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {DUMMY_INVOICES.map((invoice, index) => (
-                    <tr key={index} className="border-b">
-                      <td className="p-4 font-mono">{invoice.id}</td>
-                      <td className="p-4">{invoice.customer}</td>
-                      <td className="p-4 font-semibold">{invoice.amount}</td>
-                      <td className="p-4">{invoice.date}</td>
-                      <td className="p-4">{invoice.due}</td>
-                      <td className="p-4">
-                        <Badge variant={
-                          invoice.status === "Paid" ? "default" :
-                          invoice.status === "Pending" ? "secondary" :
-                          invoice.status === "Overdue" ? "destructive" :
-                          "outline"
-                        }>
-                          {invoice.status}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex space-x-2">
-                          <Button variant="outline" size="sm">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Send className="h-4 w-4" />
-                          </Button>
-                        </div>
+                  {filteredInvoices.length > 0 ? (
+                    filteredInvoices.map((invoice, index) => (
+                      <tr key={index} className="border-b">
+                        <td className="p-4 font-mono">{invoice.id}</td>
+                        <td className="p-4">{invoice.customer}</td>
+                        <td className="p-4 font-semibold">{invoice.amount}</td>
+                        <td className="p-4">{invoice.date}</td>
+                        <td className="p-4">{invoice.due}</td>
+                        <td className="p-4">
+                          <Badge variant={
+                            invoice.status === "Paid" ? "default" :
+                            invoice.status === "Pending" ? "secondary" :
+                            invoice.status === "Overdue" ? "destructive" :
+                            "outline"
+                          }>
+                            {invoice.status}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex space-x-2">
+                            <Button variant="outline" size="sm">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-gray-500">
+                        {searchTerm ? `No invoices found matching "${searchTerm}"` : 'No invoices found'}
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
