@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -383,8 +382,6 @@ EOF
     print_status "Database setup completed successfully"
 }
 
-# ... keep existing code (all other functions remain the same)
-
 setup_odbc() {
     local asterisk_db_password=$1
     
@@ -572,6 +569,11 @@ setup_web() {
 
     sudo chown -R $USER:$USER /opt/billing/web
 
+    # Make all scripts executable
+    print_status "Making installation scripts executable..."
+    chmod +x scripts/*.sh
+    chmod +x install.sh
+
     npm install
     npm run build
 
@@ -664,6 +666,34 @@ EOF
     print_status "Backend API setup completed"
 }
 
+populate_database() {
+    local mysql_root_password=$1
+    
+    print_status "Populating database with sample data..."
+    
+    cd /opt/billing/web
+    
+    # Run database schema update script
+    if [ -f "scripts/update-database-schema.sh" ]; then
+        print_status "Updating database schema..."
+        ./scripts/update-database-schema.sh "${mysql_root_password}"
+    fi
+    
+    # Run sample data population script
+    if [ -f "scripts/populate-sample-data.sh" ]; then
+        print_status "Populating sample data..."
+        ./scripts/populate-sample-data.sh "${mysql_root_password}"
+    fi
+    
+    # Verify database population
+    if [ -f "scripts/verify-database-population.sh" ]; then
+        print_status "Verifying database population..."
+        ./scripts/verify-database-population.sh "${mysql_root_password}"
+    fi
+    
+    print_status "Database population completed successfully"
+}
+
 perform_system_checks() {
     print_status "Performing final system checks..."
 
@@ -716,27 +746,40 @@ display_installation_summary() {
     echo "• MySQL Root Password: ${mysql_root_password}"
     echo "• Asterisk DB Password: ${asterisk_db_password}"
     echo ""
+    print_status "Sample Data Included:"
+    echo "• 8 sample customers with various account types"
+    echo "• 20 international rate destinations"
+    echo "• 10 DID numbers (some assigned, some available)"
+    echo "• 3 admin users with different roles"
+    echo "• 4 SIP trunks and 5 routes configured"
+    echo "• Sample CDR records, invoices, and payments"
+    echo "• SMS templates and support tickets"
+    echo "• Complete audit log entries"
+    echo ""
     print_status "Troubleshooting Commands:"
     echo "• Check backend logs: sudo journalctl -u ibilling-backend -f"
     echo "• Restart backend: sudo systemctl restart ibilling-backend"
-    echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM users;'"
+    echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM customers;'"
     echo "• Check backend API: curl http://localhost:3001/health"
+    echo "• Verify data population: ./scripts/verify-database-population.sh"
     echo ""
     print_status "Next Steps:"
     echo "1. Test the web interface at http://your-server-ip"
     echo "2. Login with admin/admin123 to access the admin panel"
-    echo "3. Configure your domain name in Nginx if needed"
-    echo "4. Set up SSL certificates with: sudo certbot --nginx"
-    echo "5. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
-    echo "6. Review Asterisk configuration in /etc/asterisk/"
+    echo "3. Review the sample data and customize as needed"
+    echo "4. Configure your domain name in Nginx if needed"
+    echo "5. Set up SSL certificates with: sudo certbot --nginx"
+    echo "6. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
+    echo "7. Review Asterisk configuration in /etc/asterisk/"
     echo ""
     print_warning "Remember to:"
     echo "• Change the default admin password after first login"
     echo "• Configure backup procedures"
     echo "• Set up monitoring"
     echo "• Review security settings"
+    echo "• Customize sample data for your business needs"
 
-    print_status "Installation completed successfully!"
+    print_status "Installation completed successfully with comprehensive sample data!"
 }
 
 # Main installation function
@@ -798,14 +841,18 @@ main() {
     print_status "Setting up backend API..."
     setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 10. Perform final system checks and display summary
+    # 10. Populate database with sample data
+    print_status "Populating database..."
+    populate_database "${MYSQL_ROOT_PASSWORD}"
+
+    # 11. Perform final system checks and display summary
     perform_system_checks
     display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 11. Cleanup temporary files
+    # 12. Cleanup temporary files
     sudo rm -rf /tmp/ibilling-config
 
-    print_status "Installation completed successfully!"
+    print_status "Installation completed successfully with comprehensive sample data!"
 }
 
 # Execute main function
