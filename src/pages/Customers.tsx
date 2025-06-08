@@ -41,7 +41,7 @@ const Customers = () => {
   const fetchCustomers = async () => {
     try {
       console.log('Fetching customers from database...');
-      const data = await apiClient.getCustomers();
+      const data = await apiClient.getCustomers() as any[];
       console.log('Customers data received:', data);
       
       // Transform the data to match our interface

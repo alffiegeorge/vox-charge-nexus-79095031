@@ -40,12 +40,12 @@ const CustomerDashboard = () => {
         console.log('Fetching dashboard data...');
         
         // Fetch dashboard stats
-        const stats = await apiClient.getDashboardStats();
+        const stats = await apiClient.getDashboardStats() as DashboardStats;
         console.log('Dashboard stats received:', stats);
         setDashboardStats(stats);
 
         // Fetch customers data
-        const customersData = await apiClient.getCustomers();
+        const customersData = await apiClient.getCustomers() as Customer[];
         console.log('Customers data received:', customersData);
         setCustomers(customersData);
 
