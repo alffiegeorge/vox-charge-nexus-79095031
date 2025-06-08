@@ -145,9 +145,9 @@ create_config_files() {
     
     sudo mkdir -p /tmp/ibilling-config
     
-    # Complete database schema with ALL tables and proper column definitions
+    # Complete database schema with ALL tables and proper column definitions including qr_code_enabled
     sudo tee /tmp/ibilling-config/database-schema.sql > /dev/null <<'EOF'
--- iBilling Complete Database Schema with ALL required tables
+-- iBilling Complete Database Schema with ALL required tables and columns
 CREATE TABLE IF NOT EXISTS cdr (
     id INT(11) NOT NULL AUTO_INCREMENT,
     calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
@@ -481,7 +481,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Insert basic sample data with proper column names
+-- Insert basic sample data with proper column names (now that qr_code_enabled column exists)
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
 ('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active', TRUE),
@@ -564,6 +564,8 @@ server {
 }
 EOF
 }
+
+# ... keep existing code (setup_database function and all other functions) the same ...
 
 setup_database() {
     local mysql_root_password=$1
@@ -712,7 +714,7 @@ EOF
     print_status "Database setup completed successfully"
 }
 
-# ... keep existing code (setup_odbc, install_asterisk, setup_web, setup_backend functions) the same ...
+# ... keep existing code (all other functions) the same ...
 
 setup_odbc() {
     local asterisk_db_password=$1
