@@ -73,22 +73,26 @@ async function createUsersTable() {
     `);
     console.log('✓ Users table created/exists');
     
-    // Check if admin user exists, if not create it
-    const [existingAdmin] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin']);
-    console.log('Admin user check result:', existingAdmin[0]);
+    // Always recreate the admin user with a fresh hash to ensure it works
+    console.log('Recreating admin user with fresh password hash...');
     
-    if (existingAdmin[0].count === 0) {
-      console.log('Creating default admin user...');
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      console.log('Admin password hash generated successfully');
-      await db.execute(
-        'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
-        ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
-      );
-      console.log('✓ Default admin user created with password: admin123');
-    } else {
-      console.log('Admin user already exists');
-    }
+    // Delete existing admin user
+    await db.execute('DELETE FROM users WHERE username = ?', ['admin']);
+    console.log('✓ Removed existing admin user');
+    
+    // Create new admin user with fresh bcrypt hash
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    console.log('✓ Generated fresh admin password hash');
+    
+    await db.execute(
+      'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
+      ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']
+    );
+    console.log('✓ Admin user created with fresh hash');
+    
+    // Test the hash immediately
+    const testValid = await bcrypt.compare('admin123', hashedPassword);
+    console.log('✓ Password hash test result:', testValid);
     
     // Check if customer user exists, if not create it
     const [existingCustomer] = await db.execute('SELECT COUNT(*) as count FROM users WHERE username = ?', ['customer']);
@@ -96,11 +100,11 @@ async function createUsersTable() {
     
     if (existingCustomer[0].count === 0) {
       console.log('Creating default customer user...');
-      const hashedPassword = await bcrypt.hash('customer123', 10);
+      const customerHashedPassword = await bcrypt.hash('customer123', 10);
       console.log('Customer password hash generated successfully');
       await db.execute(
         'INSERT INTO users (username, password, email, role, status) VALUES (?, ?, ?, ?, ?)',
-        ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']
+        ['customer', customerHashedPassword, 'customer@ibilling.local', 'customer', 'active']
       );
       console.log('✓ Default customer user created with password: customer123');
     } else {
@@ -211,6 +215,7 @@ app.post('/auth/login', async (req, res) => {
     console.log('Comparing passwords...');
     console.log('Input password:', password);
     console.log('Stored hash exists:', user.password ? 'Yes' : 'No');
+    console.log('Stored hash length:', user.password ? user.password.length : 0);
     
     // Password comparison with error handling
     let isValidPassword;
