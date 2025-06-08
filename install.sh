@@ -6,6 +6,8 @@
 # Exit on error
 set -e
 
+# ... keep existing code (colors, utility functions) the same ...
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -193,6 +195,8 @@ CREATE TABLE IF NOT EXISTS customers (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- ... keep existing code (all other table definitions) the same ...
 
 CREATE TABLE IF NOT EXISTS rates (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -565,8 +569,6 @@ server {
 EOF
 }
 
-# ... keep existing code (setup_database function and all other functions) the same ...
-
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -661,6 +663,46 @@ EOF
 
     print_status "Creating ALL database tables from complete schema..."
     mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
+    
+    # Add missing columns to existing tables to handle previous installation attempts
+    print_status "Ensuring all required columns exist in existing tables..."
+    mysql -u root -p"${mysql_root_password}" asterisk <<EOF
+-- Add qr_code_enabled column if it doesn't exist
+SET @column_exists = (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'asterisk' 
+    AND TABLE_NAME = 'customers' 
+    AND COLUMN_NAME = 'qr_code_enabled'
+);
+
+SET @sql = IF(@column_exists = 0, 
+    'ALTER TABLE customers ADD COLUMN qr_code_enabled BOOLEAN DEFAULT FALSE AFTER notes', 
+    'SELECT "Column qr_code_enabled already exists" as message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Add qr_code_data column if it doesn't exist
+SET @column_exists = (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'asterisk' 
+    AND TABLE_NAME = 'customers' 
+    AND COLUMN_NAME = 'qr_code_data'
+);
+
+SET @sql = IF(@column_exists = 0, 
+    'ALTER TABLE customers ADD COLUMN qr_code_data TEXT DEFAULT NULL AFTER qr_code_enabled', 
+    'SELECT "Column qr_code_data already exists" as message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+EOF
     
     # Create default admin user with proper password hash
     print_status "Creating default admin user..."
