@@ -28,9 +28,9 @@ if [ ! -d "${SCRIPT_DIR}/scripts" ]; then
     
     # Clone the repository to a temporary location
     TEMP_DIR="/tmp/ibilling-$(date +%s)"
-    git clone https://github.com/your-repo/ibilling.git "$TEMP_DIR" || {
+    git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git "$TEMP_DIR" || {
         echo -e "\033[0;31m[ERROR]\033[0m Failed to clone repository"
-        echo -e "\033[0;32m[INFO]\033[0m Please ensure you have the correct repository URL"
+        echo -e "\033[0;32m[INFO]\033[0m Please ensure you have internet connection and access to GitHub"
         echo -e "\033[0;32m[INFO]\033[0m Or manually download the scripts directory to: ${SCRIPT_DIR}/scripts"
         exit 1
     }
