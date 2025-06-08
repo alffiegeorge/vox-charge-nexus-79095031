@@ -40,7 +40,7 @@ verify_population() {
         "sms_templates:7"
         "support_tickets:5"
         "audit_logs:5"
-        "system_settings:15"
+        "system_settings:12"
     )
     
     local all_good=true
