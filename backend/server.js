@@ -121,6 +121,27 @@ async function createUsersTable() {
     `);
     console.log('✓ Users table created/exists');
     
+    // Create customers table
+    console.log('Creating/checking customers table...');
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        phone VARCHAR(20) NOT NULL,
+        company VARCHAR(100),
+        type ENUM('Prepaid', 'Postpaid') NOT NULL,
+        balance DECIMAL(10,2) DEFAULT 0.00,
+        credit_limit DECIMAL(10,2) DEFAULT 0.00,
+        address TEXT,
+        notes TEXT,
+        status ENUM('Active', 'Inactive', 'Suspended') DEFAULT 'Active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✓ Customers table created/exists');
+    
     // Always recreate the admin user with a fresh hash to ensure it works
     console.log('Recreating admin user with fresh password hash...');
     
@@ -326,7 +347,7 @@ app.post('/auth/login', async (req, res) => {
 });
 
 // Customer routes
-app.get('/customers', authenticateToken, async (req, res) => {
+app.get('/api/customers', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -340,23 +361,109 @@ app.get('/customers', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/customers', authenticateToken, async (req, res) => {
+app.post('/api/customers', authenticateToken, async (req, res) => {
   try {
+    console.log('Creating customer with request body:', req.body);
+    
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    const { id, name, email, phone, company, type, balance, credit_limit, status } = req.body;
+    const { name, email, phone, company, type, balance, credit_limit, address, notes, status } = req.body;
 
-    await executeQuery(
-      'INSERT INTO customers (id, name, email, phone, company, type, balance, credit_limit, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, name, email, phone, company, type, balance || 0, credit_limit, status || 'Active']
+    // Generate a unique customer ID
+    const customerId = `C${Date.now().toString().slice(-6)}`;
+    
+    console.log('Generated customer ID:', customerId);
+
+    // Insert customer with all fields
+    const result = await executeQuery(
+      `INSERT INTO customers (id, name, email, phone, company, type, balance, credit_limit, address, notes, status, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        customerId,
+        name,
+        email,
+        phone,
+        company || null,
+        type,
+        balance || 0,
+        credit_limit || 0,
+        address || null,
+        notes || null,
+        status || 'Active'
+      ]
     );
 
-    res.status(201).json({ message: 'Customer created successfully' });
+    console.log('Customer created successfully with ID:', customerId);
+
+    // Return the created customer data
+    const createdCustomer = {
+      id: customerId,
+      name,
+      email,
+      phone,
+      company,
+      type,
+      balance: balance || 0,
+      credit_limit: credit_limit || 0,
+      address,
+      notes,
+      status: status || 'Active',
+      created_at: new Date().toISOString()
+    };
+
+    res.status(201).json(createdCustomer);
   } catch (error) {
     console.error('Error creating customer:', error);
-    res.status(500).json({ error: 'Failed to create customer' });
+    res.status(500).json({ error: 'Failed to create customer', details: error.message });
+  }
+});
+
+app.put('/api/customers/:id', authenticateToken, async (req, res) => {
+  try {
+    console.log('Updating customer with ID:', req.params.id);
+    console.log('Update data:', req.body);
+    
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { id } = req.params;
+    const { name, email, phone, company, type, credit_limit, address, notes } = req.body;
+
+    // Check if customer exists
+    const [existingCustomer] = await executeQuery('SELECT * FROM customers WHERE id = ?', [id]);
+    
+    if (existingCustomer.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Update customer
+    await executeQuery(
+      `UPDATE customers SET 
+        name = ?, 
+        email = ?, 
+        phone = ?, 
+        company = ?, 
+        type = ?, 
+        credit_limit = ?, 
+        address = ?, 
+        notes = ?,
+        updated_at = NOW()
+       WHERE id = ?`,
+      [name, email, phone, company || null, type, credit_limit || 0, address || null, notes || null, id]
+    );
+
+    console.log('Customer updated successfully');
+
+    // Return the updated customer data
+    const [updatedCustomer] = await executeQuery('SELECT * FROM customers WHERE id = ?', [id]);
+    
+    res.json(updatedCustomer[0]);
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({ error: 'Failed to update customer', details: error.message });
   }
 });
 
@@ -666,6 +773,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use('*', (req, res) => {
+  console.log('404 - Endpoint not found:', req.method, req.originalUrl);
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
