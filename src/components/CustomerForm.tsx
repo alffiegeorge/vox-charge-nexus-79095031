@@ -30,6 +30,22 @@ interface CustomerFormProps {
   editingCustomer?: Customer | null;
 }
 
+// Define the API response interface
+interface CustomerApiResponse {
+  id?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  type?: string;
+  balance?: number;
+  status?: string;
+  credit_limit?: number;
+  address?: string;
+  notes?: string;
+  created_at?: string;
+}
+
 const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCustomer }: CustomerFormProps) => {
   const [formData, setFormData] = useState({
     name: "",
@@ -88,7 +104,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         };
 
         console.log('Updating customer with data:', updateData);
-        const response = await apiClient.updateCustomer(editingCustomer.id, updateData);
+        const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
         
         // Transform the response to match Customer interface
         const updatedCustomer: Customer = {
