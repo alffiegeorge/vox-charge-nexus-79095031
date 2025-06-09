@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,15 +49,28 @@ const CustomerDashboard = () => {
         console.log('Customers data received:', customersData);
         
         // Transform the customers data to ensure balance is a number
-        const transformedCustomers = customersData.map((customer: any) => ({
-          id: customer.id,
-          name: customer.name,
-          email: customer.email,
-          phone: customer.phone,
-          type: customer.type,
-          balance: typeof customer.balance === 'number' ? customer.balance : (parseFloat(customer.balance) || 0),
-          status: customer.status
-        }));
+        const transformedCustomers = customersData.map((customer: any) => {
+          console.log('Processing customer:', customer.name, 'balance:', customer.balance, 'type:', typeof customer.balance);
+          
+          let balance = 0;
+          if (typeof customer.balance === 'number') {
+            balance = customer.balance;
+          } else if (typeof customer.balance === 'string') {
+            balance = parseFloat(customer.balance) || 0;
+          }
+          
+          console.log('Transformed balance for', customer.name, ':', balance);
+          
+          return {
+            id: customer.id,
+            name: customer.name,
+            email: customer.email,
+            phone: customer.phone,
+            type: customer.type,
+            balance: balance,
+            status: customer.status
+          };
+        });
         
         console.log('Transformed customers:', transformedCustomers);
         setCustomers(transformedCustomers);
@@ -65,7 +79,7 @@ const CustomerDashboard = () => {
         console.error('Error fetching dashboard data:', error);
         toast({
           title: "Error",
-          description: "Failed to load dashboard data. Using offline mode.",
+          description: "Failed to load customers: " + (error instanceof Error ? error.message : "Unknown error"),
           variant: "destructive",
         });
       } finally {
@@ -112,7 +126,8 @@ const CustomerDashboard = () => {
   };
 
   // Get the balance as a number, with fallback to 0
-  const customerBalance = currentCustomer?.balance || 0;
+  const customerBalance = typeof currentCustomer?.balance === 'number' ? currentCustomer.balance : 0;
+  console.log('Final customer balance:', customerBalance, 'type:', typeof customerBalance);
 
   if (loading) {
     return (
