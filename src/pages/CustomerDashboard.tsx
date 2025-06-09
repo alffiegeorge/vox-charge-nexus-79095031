@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,9 +44,22 @@ const CustomerDashboard = () => {
         setDashboardStats(stats);
 
         // Fetch customers data
-        const customersData = await apiClient.getCustomers() as Customer[];
+        const customersData = await apiClient.getCustomers() as any[];
         console.log('Customers data received:', customersData);
-        setCustomers(customersData);
+        
+        // Transform the customers data to ensure balance is a number
+        const transformedCustomers = customersData.map((customer: any) => ({
+          id: customer.id,
+          name: customer.name,
+          email: customer.email,
+          phone: customer.phone,
+          type: customer.type,
+          balance: typeof customer.balance === 'number' ? customer.balance : (parseFloat(customer.balance) || 0),
+          status: customer.status
+        }));
+        
+        console.log('Transformed customers:', transformedCustomers);
+        setCustomers(transformedCustomers);
 
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -99,6 +111,9 @@ const CustomerDashboard = () => {
     });
   };
 
+  // Get the balance as a number, with fallback to 0
+  const customerBalance = currentCustomer?.balance || 0;
+
   if (loading) {
     return (
       <div className="p-6">
@@ -136,8 +151,8 @@ const CustomerDashboard = () => {
             <CardTitle>Account Balance</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-3xl font-bold ${currentCustomer?.balance && currentCustomer.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ${currentCustomer?.balance?.toFixed(2) || '0.00'}
+            <div className={`text-3xl font-bold ${customerBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              ${customerBalance.toFixed(2)}
             </div>
             <Button 
               className="w-full mt-4 bg-blue-600 hover:bg-blue-700"
