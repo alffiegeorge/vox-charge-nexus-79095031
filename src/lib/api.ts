@@ -1,4 +1,3 @@
-
 const API_BASE_URL = '/api';
 
 export interface LoginCredentials {
@@ -79,6 +78,22 @@ export class ApiClient {
   async getCustomers() {
     console.log('ApiClient.getCustomers() called');
     return this.request('/customers');
+  }
+
+  async createCustomer(customerData: any) {
+    console.log('ApiClient.createCustomer() called with:', customerData);
+    return this.request('/customers', {
+      method: 'POST',
+      body: JSON.stringify(customerData),
+    });
+  }
+
+  async updateCustomer(customerId: string, customerData: any) {
+    console.log('ApiClient.updateCustomer() called with:', customerId, customerData);
+    return this.request(`/customers/${customerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(customerData),
+    });
   }
 
   async getCDR(params?: { page?: number; limit?: number; accountcode?: string }) {

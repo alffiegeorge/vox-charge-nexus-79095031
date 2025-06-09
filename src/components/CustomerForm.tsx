@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
 interface Customer {
   id: string;
@@ -41,6 +42,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
     address: "",
     notes: ""
   });
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -51,14 +53,14 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         phone: editingCustomer.phone || "",
         company: editingCustomer.company || "",
         type: editingCustomer.type || "",
-        creditLimit: editingCustomer.creditLimit || "",
+        creditLimit: editingCustomer.creditLimit?.replace('$', '') || "",
         address: editingCustomer.address || "",
         notes: editingCustomer.notes || ""
       });
     }
   }, [editingCustomer]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.name || !formData.email || !formData.phone || !formData.type) {
@@ -70,54 +72,68 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
       return;
     }
 
-    if (editingCustomer) {
-      // Update existing customer
-      const updatedCustomer: Customer = {
-        ...editingCustomer,
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        company: formData.company,
-        type: formData.type,
-        creditLimit: formData.creditLimit,
-        address: formData.address,
-        notes: formData.notes
-      };
+    setLoading(true);
 
-      onCustomerUpdated?.(updatedCustomer);
-      
-      toast({
-        title: "Customer Updated",
-        description: `Customer ${formData.name} has been updated successfully`,
-      });
-    } else {
-      // Create new customer
-      const customerId = `C${String(Date.now()).slice(-3).padStart(3, '0')}`;
-      
-      const newCustomer = {
-        id: customerId,
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        company: formData.company,
-        type: formData.type,
-        balance: formData.type === "Prepaid" ? "$0.00" : "$0.00",
-        status: "Active",
-        creditLimit: formData.creditLimit,
-        address: formData.address,
-        notes: formData.notes,
-        createdAt: new Date().toISOString()
-      };
+    try {
+      if (editingCustomer) {
+        // Update existing customer
+        const updateData = {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          company: formData.company,
+          type: formData.type,
+          credit_limit: formData.creditLimit ? parseFloat(formData.creditLimit.replace('$', '')) || 0 : 0,
+          address: formData.address,
+          notes: formData.notes
+        };
 
-      onCustomerCreated?.(newCustomer);
+        console.log('Updating customer with data:', updateData);
+        const updatedCustomer = await apiClient.updateCustomer(editingCustomer.id, updateData);
+        
+        onCustomerUpdated?.(updatedCustomer);
+        
+        toast({
+          title: "Customer Updated",
+          description: `Customer ${formData.name} has been updated successfully`,
+        });
+      } else {
+        // Create new customer
+        const newCustomerData = {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          company: formData.company,
+          type: formData.type,
+          balance: 0,
+          status: "Active",
+          credit_limit: formData.creditLimit ? parseFloat(formData.creditLimit.replace('$', '')) || 0 : 0,
+          address: formData.address,
+          notes: formData.notes
+        };
+
+        console.log('Creating customer with data:', newCustomerData);
+        const createdCustomer = await apiClient.createCustomer(newCustomerData);
+        
+        onCustomerCreated?.(createdCustomer);
+        
+        toast({
+          title: "Customer Created",
+          description: `Customer ${formData.name} has been created successfully`,
+        });
+      }
       
+      onClose();
+    } catch (error) {
+      console.error('Error saving customer:', error);
       toast({
-        title: "Customer Created",
-        description: `Customer ${formData.name} has been created successfully`,
+        title: "Error",
+        description: `Failed to ${editingCustomer ? 'update' : 'create'} customer: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive"
       });
+    } finally {
+      setLoading(false);
     }
-    
-    onClose();
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -144,6 +160,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                   onChange={(e) => handleInputChange("name", e.target.value)}
                   placeholder="Enter customer name"
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -155,6 +172,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                   onChange={(e) => handleInputChange("email", e.target.value)}
                   placeholder="Enter email address"
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -165,6 +183,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                   onChange={(e) => handleInputChange("phone", e.target.value)}
                   placeholder="+1-555-0123"
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -174,11 +193,12 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                   value={formData.company}
                   onChange={(e) => handleInputChange("company", e.target.value)}
                   placeholder="Enter company name"
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="type">Account Type *</Label>
-                <Select value={formData.type} onValueChange={(value) => handleInputChange("type", value)}>
+                <Select value={formData.type} onValueChange={(value) => handleInputChange("type", value)} disabled={loading}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select account type" />
                   </SelectTrigger>
@@ -194,7 +214,8 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                   id="creditLimit"
                   value={formData.creditLimit}
                   onChange={(e) => handleInputChange("creditLimit", e.target.value)}
-                  placeholder="$0.00"
+                  placeholder="0.00"
+                  disabled={loading}
                 />
               </div>
             </div>
@@ -206,6 +227,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                 onChange={(e) => handleInputChange("address", e.target.value)}
                 placeholder="Enter customer address"
                 rows={2}
+                disabled={loading}
               />
             </div>
             <div className="space-y-2">
@@ -216,14 +238,15 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
                 onChange={(e) => handleInputChange("notes", e.target.value)}
                 placeholder="Additional notes about the customer"
                 rows={3}
+                disabled={loading}
               />
             </div>
             <div className="flex justify-end space-x-2 pt-4">
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
                 Cancel
               </Button>
-              <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
-                {editingCustomer ? 'Update Customer' : 'Create Customer'}
+              <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={loading}>
+                {loading ? 'Saving...' : (editingCustomer ? 'Update Customer' : 'Create Customer')}
               </Button>
             </div>
           </form>
