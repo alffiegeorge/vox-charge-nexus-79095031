@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,22 +52,44 @@ const Customers = () => {
       console.log('Number of customers returned:', data?.length || 0);
       
       // Transform the data to match our interface
-      const transformedCustomers = data.map((customer: any) => ({
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
-        company: customer.company,
-        type: customer.type,
-        balance: customer.balance ? `$${customer.balance.toFixed(2)}` : '$0.00',
-        status: customer.status,
-        creditLimit: customer.credit_limit ? `$${customer.credit_limit.toFixed(2)}` : undefined,
-        address: customer.address,
-        notes: customer.notes,
-        createdAt: customer.created_at,
-        qrCodeEnabled: customer.qr_code_enabled || false,
-        qrCodeData: customer.qr_code_data || `voiceflow://login?token=${customer.id.toLowerCase()}${Math.random().toString(36).substring(2, 6)}&server=demo.voiceflow.com&expires=${Date.now() + (24 * 60 * 60 * 1000)}`
-      }));
+      const transformedCustomers = data.map((customer: any) => {
+        console.log('Processing customer:', customer.name, 'balance:', customer.balance, 'type:', typeof customer.balance);
+        
+        // Safely handle balance conversion
+        let balanceValue = 0;
+        if (typeof customer.balance === 'number') {
+          balanceValue = customer.balance;
+        } else if (typeof customer.balance === 'string') {
+          balanceValue = parseFloat(customer.balance) || 0;
+        }
+        
+        // Safely handle credit_limit conversion
+        let creditLimitValue = 0;
+        if (typeof customer.credit_limit === 'number') {
+          creditLimitValue = customer.credit_limit;
+        } else if (typeof customer.credit_limit === 'string') {
+          creditLimitValue = parseFloat(customer.credit_limit) || 0;
+        }
+        
+        console.log('Transformed balance for', customer.name, ':', balanceValue);
+        
+        return {
+          id: customer.id,
+          name: customer.name,
+          email: customer.email,
+          phone: customer.phone,
+          company: customer.company,
+          type: customer.type,
+          balance: `$${balanceValue.toFixed(2)}`,
+          status: customer.status,
+          creditLimit: creditLimitValue > 0 ? `$${creditLimitValue.toFixed(2)}` : undefined,
+          address: customer.address,
+          notes: customer.notes,
+          createdAt: customer.created_at,
+          qrCodeEnabled: customer.qr_code_enabled || false,
+          qrCodeData: customer.qr_code_data || `voiceflow://login?token=${customer.id.toLowerCase()}${Math.random().toString(36).substring(2, 6)}&server=demo.voiceflow.com&expires=${Date.now() + (24 * 60 * 60 * 1000)}`
+        };
+      });
       
       console.log('Transformed customers:', transformedCustomers);
       setCustomers(transformedCustomers);
