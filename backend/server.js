@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
@@ -346,7 +345,7 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-// Customer routes
+// Customer routes - Fixed to use /api prefix
 app.get('/api/customers', authenticateToken, async (req, res) => {
   try {
     if (!db) {
@@ -467,8 +466,8 @@ app.put('/api/customers/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// CDR routes
-app.get('/cdr', authenticateToken, async (req, res) => {
+// CDR routes - Fixed to use /api prefix
+app.get('/api/cdr', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -518,8 +517,8 @@ app.get('/cdr', authenticateToken, async (req, res) => {
   }
 });
 
-// Dashboard stats
-app.get('/dashboard/stats', authenticateToken, async (req, res) => {
+// Dashboard stats - Fixed to use /api prefix
+app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -556,8 +555,8 @@ app.get('/dashboard/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Rate Management routes
-app.get('/rates', authenticateToken, async (req, res) => {
+// Rate Management routes - Fixed to use /api prefix
+app.get('/api/rates', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -571,7 +570,7 @@ app.get('/rates', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/rates', authenticateToken, async (req, res) => {
+app.post('/api/rates', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -591,7 +590,7 @@ app.post('/rates', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/rates/:id', authenticateToken, async (req, res) => {
+app.put('/api/rates/:id', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -612,7 +611,7 @@ app.put('/rates/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/rates/:id', authenticateToken, async (req, res) => {
+app.delete('/api/rates/:id', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -628,8 +627,8 @@ app.delete('/rates/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Call Quality routes
-app.get('/call-quality', authenticateToken, async (req, res) => {
+// Call Quality routes - Fixed to use /api prefix
+app.get('/api/call-quality', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -657,8 +656,8 @@ app.get('/call-quality', authenticateToken, async (req, res) => {
   }
 });
 
-// SMS Management routes
-app.get('/sms', authenticateToken, async (req, res) => {
+// SMS Management routes - Fixed to use /api prefix
+app.get('/api/sms', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -686,7 +685,7 @@ app.get('/sms', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/sms/send', authenticateToken, async (req, res) => {
+app.post('/api/sms/send', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -708,7 +707,7 @@ app.post('/sms/send', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/sms/templates', authenticateToken, async (req, res) => {
+app.get('/api/sms/templates', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -722,7 +721,7 @@ app.get('/sms/templates', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/sms/templates', authenticateToken, async (req, res) => {
+app.post('/api/sms/templates', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
@@ -742,7 +741,7 @@ app.post('/sms/templates', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/sms/stats', authenticateToken, async (req, res) => {
+app.get('/api/sms/stats', authenticateToken, async (req, res) => {
   try {
     if (!db) {
       return res.status(500).json({ error: 'Database not available' });
