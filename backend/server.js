@@ -9,6 +9,8 @@ require('dotenv').config();
 const { createDatabasePool, executeQuery } = require('./database');
 // Import Asterisk integration
 const asteriskManager = require('./asterisk-manager');
+// Add the realtime setup import
+const { setupRealtimeTables } = require('./realtime-setup');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -222,6 +224,9 @@ async function createBillingTables() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // Add realtime tables setup
+    await setupRealtimeTables();
     
     console.log('✓ Billing core tables created successfully');
     
@@ -523,3 +528,5 @@ process.on('SIGINT', () => {
 });
 
 startServer().catch(console.error);
+
+</edits_to_apply>
