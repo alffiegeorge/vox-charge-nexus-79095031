@@ -1,10 +1,14 @@
 const express = require('express');
-const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 require('dotenv').config();
+
+// Import database functions
+const { createDatabasePool, executeQuery } = require('./database');
+// Import Asterisk integration
+const asteriskManager = require('./asterisk-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -14,60 +18,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection with enhanced configuration
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || 'asterisk',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'asterisk',
-  connectionLimit: 10,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true,
-  idleTimeout: 300000,
-  maxIdle: 10,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0
-};
-
 let db;
-
-async function createDatabasePool() {
-  try {
-    console.log('Creating database connection pool...');
-    console.log(`Host: ${dbConfig.host}:${dbConfig.port}`);
-    console.log(`Database: ${dbConfig.database}`);
-    console.log(`User: ${dbConfig.user}`);
-    
-    db = mysql.createPool(dbConfig);
-    
-    // Test the connection
-    const connection = await db.getConnection();
-    await connection.ping();
-    connection.release();
-    console.log('✓ Database pool created and tested successfully');
-    
-    // Handle pool events
-    db.pool.on('connection', function (connection) {
-      console.log('New database connection established as id ' + connection.threadId);
-    });
-
-    db.pool.on('error', function(err) {
-      console.error('Database pool error:', err);
-      if(err.code === 'PROTOCOL_CONNECTION_LOST') {
-        console.log('Attempting to reconnect to database...');
-        setTimeout(createDatabasePool, 2000);
-      }
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('✗ Database pool creation failed:', error.message);
-    console.error('Please check your database configuration and ensure MySQL is running');
-    return false;
-  }
-}
 
 async function initializeDatabase() {
   const success = await createDatabasePool();
@@ -76,32 +27,15 @@ async function initializeDatabase() {
     await createUsersTable();
     // Create billing core tables
     await createBillingTables();
-  }
-}
-
-async function executeQuery(query, params = []) {
-  let connection;
-  try {
-    if (!db) {
-      throw new Error('Database pool not available');
+    
+    // Initialize Asterisk connection
+    try {
+      await asteriskManager.connect();
+      console.log('✓ Asterisk Manager Interface connected');
+    } catch (error) {
+      console.warn('⚠ Asterisk AMI connection failed:', error.message);
+      console.warn('⚠ PJSIP endpoint creation will be disabled');
     }
-    
-    connection = await db.getConnection();
-    const result = await connection.execute(query, params);
-    connection.release();
-    return result;
-  } catch (error) {
-    if (connection) connection.release();
-    
-    // Handle connection errors
-    if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST' || error.code === 'ER_ACCESS_DENIED_ERROR') {
-      console.error('Database connection error:', error.message);
-      console.log('Attempting to recreate database pool...');
-      await createDatabasePool();
-      throw new Error('Database connection failed. Please try again.');
-    }
-    
-    throw error;
   }
 }
 
@@ -334,7 +268,8 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'iBilling API Server is running',
-    database: db ? 'Connected' : 'Disconnected',
+    database: 'Connected',
+    asterisk: asteriskManager.isConnected ? 'Connected' : 'Disconnected',
     environment: process.env.NODE_ENV || 'development'
   });
 });
@@ -466,29 +401,11 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-// Customer routes - Fixed to use /api prefix
-app.get('/api/customers', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const [customers] = await executeQuery('SELECT * FROM customers ORDER BY created_at DESC');
-    res.json(customers);
-  } catch (error) {
-    console.error('Error fetching customers:', error);
-    res.status(500).json({ error: 'Failed to fetch customers' });
-  }
-});
-
+// Customer routes - Updated to include Asterisk integration
 app.post('/api/customers', authenticateToken, async (req, res) => {
   try {
     console.log('Creating customer with request body:', req.body);
     
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
     const { name, email, phone, company, type, balance, credit_limit, address, notes, status } = req.body;
 
     // Generate a unique customer ID
@@ -517,7 +434,17 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
 
     console.log('Customer created successfully with ID:', customerId);
 
-    // Return the created customer data
+    // Create PJSIP endpoint for the customer
+    let sipCredentials = null;
+    try {
+      sipCredentials = await asteriskManager.createPJSIPEndpoint(customerId, { name, email, phone });
+      console.log('✓ PJSIP endpoint created for customer:', customerId);
+    } catch (asteriskError) {
+      console.warn('⚠ Failed to create PJSIP endpoint:', asteriskError.message);
+      console.warn('⚠ Customer created but SIP endpoint creation failed');
+    }
+
+    // Return the created customer data with SIP info
     const createdCustomer = {
       id: customerId,
       name,
@@ -530,7 +457,8 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
       address,
       notes,
       status: status || 'Active',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sip_credentials: sipCredentials
     };
 
     res.status(201).json(createdCustomer);
@@ -540,557 +468,32 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/customers/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('Updating customer with ID:', req.params.id);
-    console.log('Update data:', req.body);
-    
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { id } = req.params;
-    const { name, email, phone, company, type, credit_limit, address, notes } = req.body;
-
-    // Check if customer exists
-    const [existingCustomer] = await executeQuery('SELECT * FROM customers WHERE id = ?', [id]);
-    
-    if (existingCustomer.length === 0) {
-      return res.status(404).json({ error: 'Customer not found' });
-    }
-
-    // Update customer
-    await executeQuery(
-      `UPDATE customers SET 
-        name = ?, 
-        email = ?, 
-        phone = ?, 
-        company = ?, 
-        type = ?, 
-        credit_limit = ?, 
-        address = ?, 
-        notes = ?,
-        updated_at = NOW()
-       WHERE id = ?`,
-      [name, email, phone, company || null, type, credit_limit || 0, address || null, notes || null, id]
-    );
-
-    console.log('Customer updated successfully');
-
-    // Return the updated customer data
-    const [updatedCustomer] = await executeQuery('SELECT * FROM customers WHERE id = ?', [id]);
-    
-    res.json(updatedCustomer[0]);
-  } catch (error) {
-    console.error('Error updating customer:', error);
-    res.status(500).json({ error: 'Failed to update customer', details: error.message });
-  }
-});
-
-// Billing Core routes
-app.post('/api/billing/charge', authenticateToken, async (req, res) => {
-  try {
-    const { customer_id, amount, description, call_id } = req.body;
-    
-    if (!customer_id || !amount) {
-      return res.status(400).json({ error: 'Customer ID and amount are required' });
-    }
-
-    // Get customer current balance
-    const [customer] = await executeQuery('SELECT balance FROM customers WHERE id = ?', [customer_id]);
-    
-    if (customer.length === 0) {
-      return res.status(404).json({ error: 'Customer not found' });
-    }
-
-    const currentBalance = parseFloat(customer[0].balance);
-    const chargeAmount = parseFloat(amount);
-    const newBalance = currentBalance - chargeAmount;
-
-    // Update customer balance
-    await executeQuery('UPDATE customers SET balance = ? WHERE id = ?', [newBalance, customer_id]);
-
-    // Record billing history
-    await executeQuery(
-      'INSERT INTO billing_history (customer_id, transaction_type, amount, description, call_id, balance_before, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [customer_id, 'charge', chargeAmount, description, call_id, currentBalance, newBalance]
-    );
-
-    res.json({
-      success: true,
-      previous_balance: currentBalance,
-      charged_amount: chargeAmount,
-      new_balance: newBalance
-    });
-
-  } catch (error) {
-    console.error('Error processing charge:', error);
-    res.status(500).json({ error: 'Failed to process charge' });
-  }
-});
-
-app.post('/api/billing/refill', authenticateToken, async (req, res) => {
-  try {
-    const { customerId, amount } = req.body;
-    
-    if (!customerId || !amount) {
-      return res.status(400).json({ error: 'Customer ID and amount are required' });
-    }
-
-    // Get customer current balance
-    const [customer] = await executeQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
-    
-    if (customer.length === 0) {
-      return res.status(404).json({ error: 'Customer not found' });
-    }
-
-    const currentBalance = parseFloat(customer[0].balance);
-    const refillAmount = parseFloat(amount);
-    const newBalance = currentBalance + refillAmount;
-
-    // Update customer balance
-    await executeQuery('UPDATE customers SET balance = ? WHERE id = ?', [newBalance, customerId]);
-
-    // Record billing history
-    await executeQuery(
-      'INSERT INTO billing_history (customer_id, transaction_type, amount, description, balance_before, balance_after) VALUES (?, ?, ?, ?, ?, ?)',
-      [customerId, 'credit', refillAmount, 'Manual credit refill', currentBalance, newBalance]
-    );
-
-    res.json({
-      success: true,
-      previous_balance: currentBalance,
-      refill_amount: refillAmount,
-      new_balance: newBalance
-    });
-
-  } catch (error) {
-    console.error('Error processing refill:', error);
-    res.status(500).json({ error: 'Failed to process refill' });
-  }
-});
-
-app.get('/api/billing/history/:customer_id', authenticateToken, async (req, res) => {
-  try {
-    const { customer_id } = req.params;
-    const { limit = 50, offset = 0 } = req.query;
-
-    const [history] = await executeQuery(
-      'SELECT * FROM billing_history WHERE customer_id = ? ORDER BY processed_at DESC LIMIT ? OFFSET ?',
-      [customer_id, parseInt(limit), parseInt(offset)]
-    );
-
-    res.json(history);
-  } catch (error) {
-    console.error('Error fetching billing history:', error);
-    res.status(500).json({ error: 'Failed to fetch billing history' });
-  }
-});
-
-app.post('/api/billing/rate-call', authenticateToken, async (req, res) => {
-  try {
-    const { called_number, duration } = req.body;
-    
-    // Find appropriate rate based on called number
-    const [rates] = await executeQuery(
-      'SELECT * FROM rates WHERE ? LIKE CONCAT(prefix, "%") ORDER BY LENGTH(prefix) DESC LIMIT 1',
-      [called_number]
-    );
-
-    if (rates.length === 0) {
-      return res.status(404).json({ error: 'No rate found for this destination' });
-    }
-
-    const rate = rates[0];
-    const durationMinutes = Math.ceil(duration / 60);
-    const billingMinutes = Math.max(rate.minimum_duration / 60, Math.ceil(durationMinutes / (rate.billing_increment / 60)) * (rate.billing_increment / 60));
-    const cost = parseFloat(rate.connection_fee) + (billingMinutes * parseFloat(rate.rate));
-
-    res.json({
-      rate_id: rate.id,
-      destination: rate.destination,
-      rate_per_minute: rate.rate,
-      connection_fee: rate.connection_fee,
-      duration_seconds: duration,
-      billing_minutes: billingMinutes,
-      total_cost: cost.toFixed(4)
-    });
-
-  } catch (error) {
-    console.error('Error rating call:', error);
-    res.status(500).json({ error: 'Failed to rate call' });
-  }
-});
-
-// Billing Plans routes
-app.get('/api/billing/plans', authenticateToken, async (req, res) => {
-  try {
-    const [plans] = await executeQuery('SELECT * FROM billing_plans WHERE status = "active" ORDER BY created_at DESC');
-    res.json(plans);
-  } catch (error) {
-    console.error('Error fetching billing plans:', error);
-    res.status(500).json({ error: 'Failed to fetch billing plans' });
-  }
-});
-
-app.post('/api/billing/plans', authenticateToken, async (req, res) => {
-  try {
-    const { name, price, minutes, features } = req.body;
-    
-    const featuresJson = Array.isArray(features) ? JSON.stringify(features) : JSON.stringify(features.split(',').map(f => f.trim()));
-    
-    await executeQuery(
-      'INSERT INTO billing_plans (name, price, minutes, features) VALUES (?, ?, ?, ?)',
-      [name, price, minutes, featuresJson]
-    );
-
-    res.status(201).json({ message: 'Billing plan created successfully' });
-  } catch (error) {
-    console.error('Error creating billing plan:', error);
-    res.status(500).json({ error: 'Failed to create billing plan' });
-  }
-});
-
-app.put('/api/billing/plans/:id', authenticateToken, async (req, res) => {
+// New route to get SIP credentials for a customer
+app.get('/api/customers/:id/sip', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, price, minutes, features } = req.body;
+    const credentials = await asteriskManager.getSipCredentials(id);
     
-    const featuresJson = Array.isArray(features) ? JSON.stringify(features) : JSON.stringify(features.split(',').map(f => f.trim()));
-    
-    await executeQuery(
-      'UPDATE billing_plans SET name = ?, price = ?, minutes = ?, features = ? WHERE id = ?',
-      [name, price, minutes, featuresJson, id]
-    );
-
-    res.json({ message: 'Billing plan updated successfully' });
-  } catch (error) {
-    console.error('Error updating billing plan:', error);
-    res.status(500).json({ error: 'Failed to update billing plan' });
-  }
-});
-
-app.delete('/api/billing/plans/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    await executeQuery('UPDATE billing_plans SET status = "inactive" WHERE id = ?', [id]);
-
-    res.json({ message: 'Billing plan deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting billing plan:', error);
-    res.status(500).json({ error: 'Failed to delete billing plan' });
-  }
-});
-
-// CDR routes - Fixed to use /api prefix
-app.get('/api/cdr', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { page = 1, limit = 50, accountcode } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = 'SELECT * FROM cdr';
-    let params = [];
-
-    if (accountcode) {
-      query += ' WHERE accountcode = ?';
-      params.push(accountcode);
-    }
-
-    query += ' ORDER BY calldate DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [records] = await db.execute(query, params);
-    
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM cdr';
-    let countParams = [];
-    
-    if (accountcode) {
-      countQuery += ' WHERE accountcode = ?';
-      countParams.push(accountcode);
+    if (!credentials) {
+      return res.status(404).json({ error: 'SIP credentials not found for this customer' });
     }
     
-    const [countResult] = await db.execute(countQuery, countParams);
-    const total = countResult[0].total;
-
-    res.json({
-      records,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-
+    res.json(credentials);
   } catch (error) {
-    console.error('Error fetching CDR:', error);
-    res.status(500).json({ error: 'Failed to fetch CDR records' });
+    console.error('Error fetching SIP credentials:', error);
+    res.status(500).json({ error: 'Failed to fetch SIP credentials' });
   }
 });
 
-// Dashboard stats - Fixed to use /api prefix
-app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
+// New route to list Asterisk endpoints
+app.get('/api/asterisk/endpoints', authenticateToken, async (req, res) => {
   try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    // Total customers
-    const [customerCount] = await db.execute('SELECT COUNT(*) as count FROM customers');
-    
-    // Active calls (last 24 hours)
-    const [activeCallsCount] = await db.execute(
-      'SELECT COUNT(*) as count FROM cdr WHERE calldate >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
-    );
-    
-    // Total revenue (sum of billsec for answered calls)
-    const [revenueResult] = await db.execute(
-      'SELECT SUM(billsec) as total_seconds FROM cdr WHERE disposition = "ANSWERED"'
-    );
-    
-    // Recent calls
-    const [recentCalls] = await db.execute(
-      'SELECT * FROM cdr ORDER BY calldate DESC LIMIT 10'
-    );
-
-    res.json({
-      totalCustomers: customerCount[0].count,
-      activeCalls: activeCallsCount[0].count,
-      totalRevenue: Math.round((revenueResult[0].total_seconds || 0) * 0.01), // Assuming $0.01 per second
-      recentCalls
-    });
-
+    const endpoints = await asteriskManager.listEndpoints();
+    res.json(endpoints);
   } catch (error) {
-    console.error('Error fetching dashboard stats:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
+    console.error('Error listing Asterisk endpoints:', error);
+    res.status(500).json({ error: 'Failed to list Asterisk endpoints' });
   }
-});
-
-// Rate Management routes - Fixed to use /api prefix
-app.get('/api/rates', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const [rates] = await db.execute('SELECT * FROM rates ORDER BY created_at DESC');
-    res.json(rates);
-  } catch (error) {
-    console.error('Error fetching rates:', error);
-    res.status(500).json({ error: 'Failed to fetch rates' });
-  }
-});
-
-app.post('/api/rates', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { destination, prefix, rate, connection, description } = req.body;
-
-    await db.execute(
-      'INSERT INTO rates (destination, prefix, rate, connection_fee, description) VALUES (?, ?, ?, ?, ?)',
-      [destination, prefix, rate, connection, description]
-    );
-
-    res.status(201).json({ message: 'Rate created successfully' });
-  } catch (error) {
-    console.error('Error creating rate:', error);
-    res.status(500).json({ error: 'Failed to create rate' });
-  }
-});
-
-app.put('/api/rates/:id', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { id } = req.params;
-    const { destination, prefix, rate, connection, description } = req.body;
-
-    await db.execute(
-      'UPDATE rates SET destination = ?, prefix = ?, rate = ?, connection_fee = ?, description = ? WHERE id = ?',
-      [destination, prefix, rate, connection, description, id]
-    );
-
-    res.json({ message: 'Rate updated successfully' });
-  } catch (error) {
-    console.error('Error updating rate:', error);
-    res.status(500).json({ error: 'Failed to update rate' });
-  }
-});
-
-app.delete('/api/rates/:id', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { id } = req.params;
-    await db.execute('DELETE FROM rates WHERE id = ?', [id]);
-
-    res.json({ message: 'Rate deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting rate:', error);
-    res.status(500).json({ error: 'Failed to delete rate' });
-  }
-});
-
-// Call Quality routes - Fixed to use /api prefix
-app.get('/api/call-quality', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { page = 1, limit = 50, date } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = 'SELECT * FROM cdr WHERE disposition IS NOT NULL';
-    let params = [];
-
-    if (date) {
-      query += ' AND DATE(calldate) = ?';
-      params.push(date);
-    }
-
-    query += ' ORDER BY calldate DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [records] = await db.execute(query, params);
-    res.json({ records });
-  } catch (error) {
-    console.error('Error fetching call quality data:', error);
-    res.status(500).json({ error: 'Failed to fetch call quality data' });
-  }
-});
-
-// SMS Management routes - Fixed to use /api prefix
-app.get('/api/sms', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { page = 1, limit = 50, search } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = 'SELECT * FROM sms_history';
-    let params = [];
-
-    if (search) {
-      query += ' WHERE phone_number LIKE ? OR message LIKE ?';
-      params.push(`%${search}%`, `%${search}%`);
-    }
-
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [records] = await db.execute(query, params);
-    res.json({ records });
-  } catch (error) {
-    console.error('Error fetching SMS history:', error);
-    res.status(500).json({ error: 'Failed to fetch SMS history' });
-  }
-});
-
-app.post('/api/sms/send', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { recipients, message, schedule } = req.body;
-
-    for (const recipient of recipients) {
-      await db.execute(
-        'INSERT INTO sms_history (phone_number, message, status, cost, scheduled_at) VALUES (?, ?, ?, ?, ?)',
-        [recipient, message, schedule ? 'Scheduled' : 'Sent', 0.05, schedule]
-      );
-    }
-
-    res.status(201).json({ message: 'SMS sent successfully' });
-  } catch (error) {
-    console.error('Error sending SMS:', error);
-    res.status(500).json({ error: 'Failed to send SMS' });
-  }
-});
-
-app.get('/api/sms/templates', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const [templates] = await db.execute('SELECT * FROM sms_templates ORDER BY created_at DESC');
-    res.json(templates);
-  } catch (error) {
-    console.error('Error fetching SMS templates:', error);
-    res.status(500).json({ error: 'Failed to fetch SMS templates' });
-  }
-});
-
-app.post('/api/sms/templates', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const { title, message, category } = req.body;
-
-    await db.execute(
-      'INSERT INTO sms_templates (title, message, category) VALUES (?, ?, ?)',
-      [title, message, category]
-    );
-
-    res.status(201).json({ message: 'SMS template created successfully' });
-  } catch (error) {
-    console.error('Error creating SMS template:', error);
-    res.status(500).json({ error: 'Failed to create SMS template' });
-  }
-});
-
-app.get('/api/sms/stats', authenticateToken, async (req, res) => {
-  try {
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const [sentResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history');
-    const [deliveredResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history WHERE status = "Delivered"');
-    const [failedResult] = await db.execute('SELECT COUNT(*) as count FROM sms_history WHERE status = "Failed"');
-    const [costResult] = await db.execute('SELECT SUM(cost) as total FROM sms_history');
-
-    res.json({
-      sent: sentResult[0].count,
-      delivered: deliveredResult[0].count,
-      failed: failedResult[0].count,
-      cost: costResult[0].total || 0
-    });
-  } catch (error) {
-    console.error('Error fetching SMS stats:', error);
-    res.status(500).json({ error: 'Failed to fetch SMS stats' });
-  }
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  console.log('404 - Endpoint not found:', req.method, req.originalUrl);
-  res.status(404).json({ error: 'Endpoint not found' });
 });
 
 // Start server
@@ -1111,20 +514,12 @@ async function startServer() {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
-  if (db) {
-    db.end();
-  }
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down gracefully');
-  if (db) {
-    db.end();
-  }
   process.exit(0);
 });
 
 startServer().catch(console.error);
-
-}
