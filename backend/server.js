@@ -74,6 +74,8 @@ async function initializeDatabase() {
   if (success) {
     // Create users table if it doesn't exist
     await createUsersTable();
+    // Create billing core tables
+    await createBillingTables();
   }
 }
 
@@ -186,6 +188,125 @@ async function createUsersTable() {
     console.log('✓ Users table ready');
   } catch (error) {
     console.error('Error setting up users table:', error.message);
+    console.error('Full error:', error);
+  }
+}
+
+async function createBillingTables() {
+  try {
+    console.log('Creating billing core tables...');
+    
+    // Create rates table for call pricing
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS rates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        destination VARCHAR(100) NOT NULL,
+        prefix VARCHAR(20) NOT NULL,
+        rate DECIMAL(10,4) NOT NULL,
+        connection_fee DECIMAL(10,4) DEFAULT 0.0000,
+        minimum_duration INT DEFAULT 60,
+        billing_increment INT DEFAULT 60,
+        description TEXT,
+        effective_date DATE DEFAULT CURRENT_DATE,
+        status ENUM('active', 'inactive') DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create billing_history table for tracking charges
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS billing_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        customer_id VARCHAR(50) NOT NULL,
+        transaction_type ENUM('charge', 'credit', 'refund', 'adjustment') NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        description TEXT,
+        call_id VARCHAR(100),
+        reference_id VARCHAR(100),
+        balance_before DECIMAL(10,2),
+        balance_after DECIMAL(10,2),
+        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+      )
+    `);
+    
+    // Create active_calls table for real-time billing
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS active_calls (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        call_id VARCHAR(100) UNIQUE NOT NULL,
+        customer_id VARCHAR(50),
+        caller_id VARCHAR(50),
+        called_number VARCHAR(50),
+        destination VARCHAR(100),
+        rate_id INT,
+        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estimated_cost DECIMAL(10,4) DEFAULT 0.0000,
+        status ENUM('active', 'completed', 'failed') DEFAULT 'active',
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+        FOREIGN KEY (rate_id) REFERENCES rates(id) ON DELETE SET NULL
+      )
+    `);
+    
+    // Create billing_plans table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS billing_plans (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        minutes INT NOT NULL,
+        features JSON,
+        status ENUM('active', 'inactive') DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create sms_history table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS sms_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        customer_id VARCHAR(50),
+        phone_number VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        status ENUM('Sent', 'Delivered', 'Failed', 'Scheduled') DEFAULT 'Sent',
+        cost DECIMAL(10,4) DEFAULT 0.0000,
+        scheduled_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+      )
+    `);
+    
+    // Create sms_templates table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS sms_templates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(100) NOT NULL,
+        message TEXT NOT NULL,
+        category VARCHAR(50) DEFAULT 'general',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    console.log('✓ Billing core tables created successfully');
+    
+    // Insert default rate if none exist
+    const [rateCount] = await executeQuery('SELECT COUNT(*) as count FROM rates');
+    if (rateCount[0].count === 0) {
+      console.log('Inserting default rates...');
+      await executeQuery(`
+        INSERT INTO rates (destination, prefix, rate, connection_fee, description) VALUES
+        ('Local', '678', 0.15, 0.05, 'Local Vanuatu calls'),
+        ('Mobile', '7', 0.25, 0.05, 'Mobile calls'),
+        ('International', '00', 0.50, 0.10, 'International calls'),
+        ('Premium', '190', 1.50, 0.20, 'Premium rate services')
+      `);
+      console.log('✓ Default rates inserted');
+    }
+    
+  } catch (error) {
+    console.error('Error creating billing tables:', error.message);
     console.error('Full error:', error);
   }
 }
@@ -463,6 +584,202 @@ app.put('/api/customers/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating customer:', error);
     res.status(500).json({ error: 'Failed to update customer', details: error.message });
+  }
+});
+
+// Billing Core routes
+app.post('/api/billing/charge', authenticateToken, async (req, res) => {
+  try {
+    const { customer_id, amount, description, call_id } = req.body;
+    
+    if (!customer_id || !amount) {
+      return res.status(400).json({ error: 'Customer ID and amount are required' });
+    }
+
+    // Get customer current balance
+    const [customer] = await executeQuery('SELECT balance FROM customers WHERE id = ?', [customer_id]);
+    
+    if (customer.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const currentBalance = parseFloat(customer[0].balance);
+    const chargeAmount = parseFloat(amount);
+    const newBalance = currentBalance - chargeAmount;
+
+    // Update customer balance
+    await executeQuery('UPDATE customers SET balance = ? WHERE id = ?', [newBalance, customer_id]);
+
+    // Record billing history
+    await executeQuery(
+      'INSERT INTO billing_history (customer_id, transaction_type, amount, description, call_id, balance_before, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [customer_id, 'charge', chargeAmount, description, call_id, currentBalance, newBalance]
+    );
+
+    res.json({
+      success: true,
+      previous_balance: currentBalance,
+      charged_amount: chargeAmount,
+      new_balance: newBalance
+    });
+
+  } catch (error) {
+    console.error('Error processing charge:', error);
+    res.status(500).json({ error: 'Failed to process charge' });
+  }
+});
+
+app.post('/api/billing/refill', authenticateToken, async (req, res) => {
+  try {
+    const { customerId, amount } = req.body;
+    
+    if (!customerId || !amount) {
+      return res.status(400).json({ error: 'Customer ID and amount are required' });
+    }
+
+    // Get customer current balance
+    const [customer] = await executeQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
+    
+    if (customer.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const currentBalance = parseFloat(customer[0].balance);
+    const refillAmount = parseFloat(amount);
+    const newBalance = currentBalance + refillAmount;
+
+    // Update customer balance
+    await executeQuery('UPDATE customers SET balance = ? WHERE id = ?', [newBalance, customerId]);
+
+    // Record billing history
+    await executeQuery(
+      'INSERT INTO billing_history (customer_id, transaction_type, amount, description, balance_before, balance_after) VALUES (?, ?, ?, ?, ?, ?)',
+      [customerId, 'credit', refillAmount, 'Manual credit refill', currentBalance, newBalance]
+    );
+
+    res.json({
+      success: true,
+      previous_balance: currentBalance,
+      refill_amount: refillAmount,
+      new_balance: newBalance
+    });
+
+  } catch (error) {
+    console.error('Error processing refill:', error);
+    res.status(500).json({ error: 'Failed to process refill' });
+  }
+});
+
+app.get('/api/billing/history/:customer_id', authenticateToken, async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    const [history] = await executeQuery(
+      'SELECT * FROM billing_history WHERE customer_id = ? ORDER BY processed_at DESC LIMIT ? OFFSET ?',
+      [customer_id, parseInt(limit), parseInt(offset)]
+    );
+
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching billing history:', error);
+    res.status(500).json({ error: 'Failed to fetch billing history' });
+  }
+});
+
+app.post('/api/billing/rate-call', authenticateToken, async (req, res) => {
+  try {
+    const { called_number, duration } = req.body;
+    
+    // Find appropriate rate based on called number
+    const [rates] = await executeQuery(
+      'SELECT * FROM rates WHERE ? LIKE CONCAT(prefix, "%") ORDER BY LENGTH(prefix) DESC LIMIT 1',
+      [called_number]
+    );
+
+    if (rates.length === 0) {
+      return res.status(404).json({ error: 'No rate found for this destination' });
+    }
+
+    const rate = rates[0];
+    const durationMinutes = Math.ceil(duration / 60);
+    const billingMinutes = Math.max(rate.minimum_duration / 60, Math.ceil(durationMinutes / (rate.billing_increment / 60)) * (rate.billing_increment / 60));
+    const cost = parseFloat(rate.connection_fee) + (billingMinutes * parseFloat(rate.rate));
+
+    res.json({
+      rate_id: rate.id,
+      destination: rate.destination,
+      rate_per_minute: rate.rate,
+      connection_fee: rate.connection_fee,
+      duration_seconds: duration,
+      billing_minutes: billingMinutes,
+      total_cost: cost.toFixed(4)
+    });
+
+  } catch (error) {
+    console.error('Error rating call:', error);
+    res.status(500).json({ error: 'Failed to rate call' });
+  }
+});
+
+// Billing Plans routes
+app.get('/api/billing/plans', authenticateToken, async (req, res) => {
+  try {
+    const [plans] = await executeQuery('SELECT * FROM billing_plans WHERE status = "active" ORDER BY created_at DESC');
+    res.json(plans);
+  } catch (error) {
+    console.error('Error fetching billing plans:', error);
+    res.status(500).json({ error: 'Failed to fetch billing plans' });
+  }
+});
+
+app.post('/api/billing/plans', authenticateToken, async (req, res) => {
+  try {
+    const { name, price, minutes, features } = req.body;
+    
+    const featuresJson = Array.isArray(features) ? JSON.stringify(features) : JSON.stringify(features.split(',').map(f => f.trim()));
+    
+    await executeQuery(
+      'INSERT INTO billing_plans (name, price, minutes, features) VALUES (?, ?, ?, ?)',
+      [name, price, minutes, featuresJson]
+    );
+
+    res.status(201).json({ message: 'Billing plan created successfully' });
+  } catch (error) {
+    console.error('Error creating billing plan:', error);
+    res.status(500).json({ error: 'Failed to create billing plan' });
+  }
+});
+
+app.put('/api/billing/plans/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, price, minutes, features } = req.body;
+    
+    const featuresJson = Array.isArray(features) ? JSON.stringify(features) : JSON.stringify(features.split(',').map(f => f.trim()));
+    
+    await executeQuery(
+      'UPDATE billing_plans SET name = ?, price = ?, minutes = ?, features = ? WHERE id = ?',
+      [name, price, minutes, featuresJson, id]
+    );
+
+    res.json({ message: 'Billing plan updated successfully' });
+  } catch (error) {
+    console.error('Error updating billing plan:', error);
+    res.status(500).json({ error: 'Failed to update billing plan' });
+  }
+});
+
+app.delete('/api/billing/plans/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    await executeQuery('UPDATE billing_plans SET status = "inactive" WHERE id = ?', [id]);
+
+    res.json({ message: 'Billing plan deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting billing plan:', error);
+    res.status(500).json({ error: 'Failed to delete billing plan' });
   }
 });
 
@@ -809,3 +1126,5 @@ process.on('SIGINT', () => {
 });
 
 startServer().catch(console.error);
+
+}
