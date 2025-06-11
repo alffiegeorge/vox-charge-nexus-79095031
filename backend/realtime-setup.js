@@ -1,9 +1,15 @@
 
-const { executeQuery } = require('./database');
+const { createDatabasePool, executeQuery } = require('./database');
 
 async function setupRealtimeTables() {
   try {
     console.log('Setting up Asterisk realtime tables...');
+    
+    // Initialize database connection first
+    const dbConnected = await createDatabasePool();
+    if (!dbConnected) {
+      throw new Error('Failed to connect to database');
+    }
     
     // Create extensions table for dynamic dialplan
     await executeQuery(`
@@ -77,6 +83,19 @@ async function setupRealtimeTables() {
     console.error('Error setting up realtime tables:', error);
     throw error;
   }
+}
+
+// Allow this script to be run standalone
+if (require.main === module) {
+  setupRealtimeTables()
+    .then(() => {
+      console.log('Realtime tables setup completed');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Failed to setup realtime tables:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = { setupRealtimeTables };
