@@ -56,19 +56,61 @@ async function setupRealtimeTables() {
       )
     `);
     
-    // Update sip_credentials table to work with Asterisk realtime
-    await executeQuery(`
-      ALTER TABLE sip_credentials 
-      ADD COLUMN IF NOT EXISTS name VARCHAR(50) NOT NULL DEFAULT '',
-      ADD COLUMN IF NOT EXISTS type ENUM('friend', 'user', 'peer') DEFAULT 'friend',
-      ADD COLUMN IF NOT EXISTS host VARCHAR(50) DEFAULT 'dynamic',
-      ADD COLUMN IF NOT EXISTS context VARCHAR(50) DEFAULT 'from-internal',
-      ADD COLUMN IF NOT EXISTS disallow VARCHAR(100) DEFAULT 'all',
-      ADD COLUMN IF NOT EXISTS allow VARCHAR(100) DEFAULT 'ulaw,alaw,g722',
-      ADD COLUMN IF NOT EXISTS secret VARCHAR(100),
-      ADD INDEX idx_name (name),
-      ADD INDEX idx_sip_username (sip_username)
-    `);
+    // Add columns to sip_credentials table if they don't exist
+    const columnsToAdd = [
+      { name: 'name', definition: "VARCHAR(50) NOT NULL DEFAULT ''" },
+      { name: 'type', definition: "ENUM('friend', 'user', 'peer') DEFAULT 'friend'" },
+      { name: 'host', definition: "VARCHAR(50) DEFAULT 'dynamic'" },
+      { name: 'context', definition: "VARCHAR(50) DEFAULT 'from-internal'" },
+      { name: 'disallow', definition: "VARCHAR(100) DEFAULT 'all'" },
+      { name: 'allow', definition: "VARCHAR(100) DEFAULT 'ulaw,alaw,g722'" },
+      { name: 'secret', definition: "VARCHAR(100)" }
+    ];
+
+    for (const column of columnsToAdd) {
+      try {
+        await executeQuery(`
+          ALTER TABLE sip_credentials 
+          ADD COLUMN IF NOT EXISTS ${column.name} ${column.definition}
+        `);
+      } catch (error) {
+        if (error.code !== 'ER_DUP_FIELDNAME') {
+          throw error;
+        }
+        // Column already exists, continue
+      }
+    }
+
+    // Add indexes if they don't exist
+    const indexesToAdd = [
+      { name: 'idx_name', column: 'name' },
+      { name: 'idx_sip_username', column: 'sip_username' }
+    ];
+
+    for (const index of indexesToAdd) {
+      try {
+        // Check if index exists
+        const [rows] = await executeQuery(`
+          SELECT COUNT(*) as count 
+          FROM information_schema.statistics 
+          WHERE table_schema = DATABASE() 
+          AND table_name = 'sip_credentials' 
+          AND index_name = ?
+        `, [index.name]);
+
+        if (rows[0].count === 0) {
+          await executeQuery(`
+            ALTER TABLE sip_credentials 
+            ADD INDEX ${index.name} (${index.column})
+          `);
+        }
+      } catch (error) {
+        if (error.code !== 'ER_DUP_KEYNAME') {
+          throw error;
+        }
+        // Index already exists, continue
+      }
+    }
     
     // Set name field to sip_username for existing records
     await executeQuery(`
