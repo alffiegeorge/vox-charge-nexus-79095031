@@ -1,4 +1,4 @@
-const API_BASE_URL = '/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export interface LoginCredentials {
   username: string;
@@ -46,7 +46,12 @@ export class ApiClient {
       console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Network error' }));
+        let error;
+        try {
+          error = await response.json();
+        } catch {
+          error = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
         console.error('API Error response:', error);
         throw new Error(error.error || `HTTP ${response.status}`);
       }
@@ -289,3 +294,5 @@ export class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+export default apiClient;
