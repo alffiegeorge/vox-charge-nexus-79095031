@@ -483,6 +483,85 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Add Asterisk realtime tables
+CREATE TABLE IF NOT EXISTS extensions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    context VARCHAR(40) NOT NULL DEFAULT '',
+    exten VARCHAR(40) NOT NULL DEFAULT '',
+    priority INT NOT NULL DEFAULT 0,
+    app VARCHAR(40) NOT NULL DEFAULT '',
+    appdata VARCHAR(256) NOT NULL DEFAULT '',
+    UNIQUE KEY context_exten_priority (context, exten, priority)
+);
+
+CREATE TABLE IF NOT EXISTS voicemail_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(50) NOT NULL,
+    context VARCHAR(50) NOT NULL DEFAULT 'default',
+    mailbox VARCHAR(50) NOT NULL,
+    password VARCHAR(20) NOT NULL,
+    fullname VARCHAR(50) NOT NULL,
+    email VARCHAR(100),
+    pager VARCHAR(100),
+    options VARCHAR(100),
+    stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY mailbox_context (mailbox, context),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS dids (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    number VARCHAR(20) NOT NULL UNIQUE,
+    customer_id VARCHAR(50) NOT NULL,
+    description VARCHAR(100),
+    monthly_cost DECIMAL(10,2) DEFAULT 0.00,
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS sip_credentials (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(50) NOT NULL,
+    sip_username VARCHAR(50) NOT NULL UNIQUE,
+    sip_password VARCHAR(100) NOT NULL,
+    name VARCHAR(50) NOT NULL DEFAULT '',
+    type ENUM('friend', 'user', 'peer') DEFAULT 'friend',
+    host VARCHAR(50) DEFAULT 'dynamic',
+    context VARCHAR(50) DEFAULT 'from-internal',
+    disallow VARCHAR(100) DEFAULT 'all',
+    allow VARCHAR(100) DEFAULT 'ulaw,alaw,g722',
+    secret VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    INDEX idx_name (name),
+    INDEX idx_sip_username (sip_username)
+);
+
+CREATE TABLE IF NOT EXISTS active_calls (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    call_id VARCHAR(100) NOT NULL UNIQUE,
+    customer_id VARCHAR(50) NOT NULL,
+    caller_id VARCHAR(50),
+    called_number VARCHAR(50) NOT NULL,
+    rate_id INT,
+    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    estimated_cost DECIMAL(10,4) DEFAULT 0.0000,
+    status ENUM('active', 'completed', 'failed') DEFAULT 'active',
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS billing_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(50) NOT NULL,
+    transaction_type ENUM('charge', 'credit', 'refund') NOT NULL,
+    amount DECIMAL(10,4) NOT NULL,
+    description TEXT,
+    call_id VARCHAR(100),
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
 -- Insert basic sample data with proper column names (now that qr_code_enabled column exists)
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
@@ -566,6 +645,8 @@ server {
 }
 EOF
 }
+
+# ... keep existing code (setup_database, setup_odbc functions) the same ...
 
 setup_database() {
     local mysql_root_password=$1
@@ -661,6 +742,7 @@ EOF
         "customers" "rates" "did_numbers" "admin_users" "trunks" "routes" 
         "sipusers" "voicemail" "cdr" "invoices" "invoice_items" "payments" 
         "sms_messages" "sms_templates" "support_tickets" "audit_logs" "system_settings"
+        "extensions" "voicemail_users" "dids" "sip_credentials" "active_calls" "billing_history"
     )
     
     MISSING_TABLES=()
@@ -695,8 +777,6 @@ EOF
     rm -f /tmp/table_list.txt /tmp/customers_check.txt
     print_status "Database setup completed successfully"
 }
-
-# ... keep existing code (all other functions) the same ...
 
 setup_odbc() {
     local asterisk_db_password=$1
@@ -936,12 +1016,25 @@ JWT_SECRET=$(openssl rand -base64 32)
 PORT=3001
 NODE_ENV=production
 
-# Asterisk Configuration (for future use)
+# Asterisk Configuration
 ASTERISK_HOST=localhost
 ASTERISK_PORT=5038
 ASTERISK_USERNAME=admin
 ASTERISK_SECRET=
 EOF
+    
+    print_status "Setting up Asterisk realtime tables..."
+    node -e "
+    require('dotenv').config();
+    const { setupRealtimeTables } = require('./realtime-setup');
+    setupRealtimeTables().then(() => {
+        console.log('Realtime tables setup completed');
+        process.exit(0);
+    }).catch(err => {
+        console.error('Error setting up realtime tables:', err);
+        process.exit(1);
+    });
+    "
     
     print_status "Creating backend service..."
     sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
@@ -982,6 +1075,24 @@ EOF
     print_status "Backend API setup completed"
 }
 
+setup_asterisk_billing() {
+    local asterisk_db_password=$1
+    
+    print_status "Setting up Asterisk billing integration..."
+    
+    cd /opt/billing/web
+    
+    # Run the AGI setup script
+    if [ -f "scripts/setup-agi.sh" ]; then
+        print_status "Running AGI setup script..."
+        echo "${asterisk_db_password}" | ./scripts/setup-agi.sh
+    else
+        print_warning "AGI setup script not found, manual setup required"
+    fi
+    
+    print_status "Asterisk billing integration completed"
+}
+
 populate_database() {
     local mysql_root_password=$1
     
@@ -996,6 +1107,7 @@ populate_database() {
         "customers" "rates" "did_numbers" "admin_users" "trunks" "routes" 
         "sipusers" "voicemail" "cdr" "invoices" "invoice_items" "payments" 
         "sms_messages" "sms_templates" "support_tickets" "audit_logs" "system_settings"
+        "extensions" "voicemail_users" "dids" "sip_credentials" "active_calls" "billing_history"
     )
     
     MISSING_TABLES=()
@@ -1093,6 +1205,15 @@ display_installation_summary() {
     echo "• MySQL Root Password: ${mysql_root_password}"
     echo "• Asterisk DB Password: ${asterisk_db_password}"
     echo ""
+    print_status "Asterisk Billing Features Configured:"
+    echo "• Real-time call billing and authorization"
+    echo "• Prepaid/Postpaid customer support"
+    echo "• Rate-based call routing"
+    echo "• Connection fees and billing increments"
+    echo "• Balance checking and low balance warnings"
+    echo "• AGI scripts for call control"
+    echo "• ODBC realtime configuration"
+    echo ""
     print_status "Sample Data Included:"
     echo "• 8 sample customers with various account types"
     echo "• 20 international rate destinations"
@@ -1109,6 +1230,8 @@ display_installation_summary() {
     echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM customers;'"
     echo "• Check backend API: curl http://localhost:3001/health"
     echo "• Verify data population: ./scripts/verify-database-population.sh"
+    echo "• Check Asterisk: sudo asterisk -rx 'core show version'"
+    echo "• Test ODBC: isql -v asterisk-connector asterisk ${asterisk_db_password}"
     echo ""
     print_status "Next Steps:"
     echo "1. Test the web interface at http://your-server-ip"
@@ -1118,6 +1241,8 @@ display_installation_summary() {
     echo "5. Set up SSL certificates with: sudo certbot --nginx"
     echo "6. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
     echo "7. Review Asterisk configuration in /etc/asterisk/"
+    echo "8. Test SIP endpoint registration: asterisk -rx 'pjsip show endpoints'"
+    echo "9. Monitor calls: asterisk -rx 'core show channels'"
     echo ""
     print_warning "Remember to:"
     echo "• Change the default admin password after first login"
@@ -1125,8 +1250,9 @@ display_installation_summary() {
     echo "• Set up monitoring"
     echo "• Review security settings"
     echo "• Customize sample data for your business needs"
+    echo "• Configure Asterisk AMI credentials for full integration"
 
-    print_status "Installation completed successfully with comprehensive sample data!"
+    print_status "Installation completed successfully with full Asterisk billing integration!"
 }
 
 # Main installation function
@@ -1162,7 +1288,8 @@ main() {
         libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev libnewt-dev \
         libpopt-dev libical-dev libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
         libradcli-dev libneon27-dev libgmime-3.0-dev liburiparser-dev libxslt1-dev \
-        python3-dev python3-pip nginx certbot python3-certbot-nginx libcurl4-openssl-dev
+        python3-dev python3-pip nginx certbot python3-certbot-nginx libcurl4-openssl-dev \
+        php-cli php-mysql
 
     # 4. Generate passwords
     MYSQL_ROOT_PASSWORD=$(generate_password)
@@ -1188,18 +1315,22 @@ main() {
     print_status "Setting up backend API..."
     setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 10. Populate database with sample data (only after all tables are confirmed to exist)
+    # 10. Setup Asterisk billing integration
+    print_status "Setting up Asterisk billing integration..."
+    setup_asterisk_billing "${ASTERISK_DB_PASSWORD}"
+
+    # 11. Populate database with sample data (only after all tables are confirmed to exist)
     print_status "Populating database..."
     populate_database "${MYSQL_ROOT_PASSWORD}"
 
-    # 11. Perform final system checks and display summary
+    # 12. Perform final system checks and display summary
     perform_system_checks
     display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 12. Cleanup temporary files
+    # 13. Cleanup temporary files
     sudo rm -rf /tmp/ibilling-config
 
-    print_status "Installation completed successfully with comprehensive sample data!"
+    print_status "Installation completed successfully with full Asterisk billing integration!"
 }
 
 # Execute main function
