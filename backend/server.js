@@ -409,6 +409,25 @@ app.post('/auth/login', async (req, res) => {
 });
 
 // Customer routes - Updated to include Asterisk integration
+app.get('/api/customers', authenticateToken, async (req, res) => {
+  try {
+    console.log('Fetching customers from database...');
+    
+    if (!isDatabaseConnected) {
+      console.error('❌ Database not available');
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const [customers] = await executeQuery('SELECT * FROM customers ORDER BY created_at DESC');
+    console.log('✓ Customers fetched successfully:', customers.length, 'records');
+    
+    res.json(customers);
+  } catch (error) {
+    console.error('Error fetching customers:', error);
+    res.status(500).json({ error: 'Failed to fetch customers', details: error.message });
+  }
+});
+
 app.post('/api/customers', authenticateToken, async (req, res) => {
   try {
     console.log('Creating customer with request body:', req.body);
@@ -472,6 +491,37 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error creating customer:', error);
     res.status(500).json({ error: 'Failed to create customer', details: error.message });
+  }
+});
+
+app.put('/api/customers/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, phone, company, type, balance, credit_limit, address, notes, status } = req.body;
+
+    console.log('Updating customer:', id, 'with data:', req.body);
+
+    const result = await executeQuery(
+      `UPDATE customers SET 
+       name = ?, email = ?, phone = ?, company = ?, type = ?, 
+       balance = ?, credit_limit = ?, address = ?, notes = ?, status = ?,
+       updated_at = NOW()
+       WHERE id = ?`,
+      [name, email, phone, company || null, type, balance || 0, credit_limit || 0, address || null, notes || null, status || 'Active', id]
+    );
+
+    if (result[0].affectedRows === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    console.log('Customer updated successfully:', id);
+
+    // Return the updated customer data
+    const [updatedCustomers] = await executeQuery('SELECT * FROM customers WHERE id = ?', [id]);
+    res.json(updatedCustomers[0]);
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({ error: 'Failed to update customer', details: error.message });
   }
 });
 
