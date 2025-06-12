@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export interface LoginCredentials {
   username: string;
@@ -77,17 +78,17 @@ export class ApiClient {
   }
 
   async getDashboardStats() {
-    return this.request('/dashboard/stats');
+    return this.request('/api/dashboard/stats');
   }
 
   async getCustomers() {
     console.log('ApiClient.getCustomers() called');
-    return this.request('/customers');
+    return this.request('/api/customers');
   }
 
   async createCustomer(customerData: any) {
     console.log('ApiClient.createCustomer() called with:', customerData);
-    return this.request('/customers', {
+    return this.request('/api/customers', {
       method: 'POST',
       body: JSON.stringify(customerData),
     });
@@ -95,7 +96,7 @@ export class ApiClient {
 
   async updateCustomer(customerId: string, customerData: any) {
     console.log('ApiClient.updateCustomer() called with:', customerId, customerData);
-    return this.request(`/customers/${customerId}`, {
+    return this.request(`/api/customers/${customerId}`, {
       method: 'PUT',
       body: JSON.stringify(customerData),
     });
@@ -108,23 +109,23 @@ export class ApiClient {
     if (params?.accountcode) queryParams.append('accountcode', params.accountcode);
     
     const query = queryParams.toString();
-    return this.request(`/cdr${query ? `?${query}` : ''}`);
+    return this.request(`/api/cdr${query ? `?${query}` : ''}`);
   }
 
   // DID Management
   async getDIDs() {
-    return this.request('/dids');
+    return this.request('/api/dids');
   }
 
   async createDID(did: any) {
-    return this.request('/dids', {
+    return this.request('/api/dids', {
       method: 'POST',
       body: JSON.stringify(did),
     });
   }
 
   async updateDID(did: any) {
-    return this.request(`/dids/${did.number}`, {
+    return this.request(`/api/dids/${did.number}`, {
       method: 'PUT',
       body: JSON.stringify(did),
     });
@@ -132,18 +133,18 @@ export class ApiClient {
 
   // Trunk Management
   async getTrunks() {
-    return this.request('/trunks');
+    return this.request('/api/trunks');
   }
 
   async createTrunk(trunk: any) {
-    return this.request('/trunks', {
+    return this.request('/api/trunks', {
       method: 'POST',
       body: JSON.stringify(trunk),
     });
   }
 
   async updateTrunk(trunk: any) {
-    return this.request(`/trunks/${trunk.name}`, {
+    return this.request(`/api/trunks/${trunk.name}`, {
       method: 'PUT',
       body: JSON.stringify(trunk),
     });
@@ -151,18 +152,18 @@ export class ApiClient {
 
   // Route Management
   async getRoutes() {
-    return this.request('/routes');
+    return this.request('/api/routes');
   }
 
   async createRoute(route: any) {
-    return this.request('/routes', {
+    return this.request('/api/routes', {
       method: 'POST',
       body: JSON.stringify(route),
     });
   }
 
   async updateRoute(route: any) {
-    return this.request(`/routes/${route.id}`, {
+    return this.request(`/api/routes/${route.id}`, {
       method: 'PUT',
       body: JSON.stringify(route),
     });
@@ -170,15 +171,15 @@ export class ApiClient {
 
   // Invoice Management
   async getAllInvoices() {
-    return this.request('/invoices');
+    return this.request('/api/invoices');
   }
 
   async getCustomerInvoices() {
-    return this.request('/invoices/customer');
+    return this.request('/api/invoices/customer');
   }
 
   async createInvoice(invoice: any) {
-    return this.request('/invoices', {
+    return this.request('/api/invoices', {
       method: 'POST',
       body: JSON.stringify(invoice),
     });
@@ -186,32 +187,32 @@ export class ApiClient {
 
   // Billing Plans
   async getBillingPlans() {
-    return this.request('/billing/plans');
+    return this.request('/api/billing/plans');
   }
 
   async createBillingPlan(plan: any) {
-    return this.request('/billing/plans', {
+    return this.request('/api/billing/plans', {
       method: 'POST',
       body: JSON.stringify(plan),
     });
   }
 
   async updateBillingPlan(plan: any) {
-    return this.request(`/billing/plans/${plan.id}`, {
+    return this.request(`/api/billing/plans/${plan.id}`, {
       method: 'PUT',
       body: JSON.stringify(plan),
     });
   }
 
   async deleteBillingPlan(planId: string) {
-    return this.request(`/billing/plans/${planId}`, {
+    return this.request(`/api/billing/plans/${planId}`, {
       method: 'DELETE',
     });
   }
 
   // Credit refill
   async processRefill(customerId: string, amount: number) {
-    return this.request('/billing/refill', {
+    return this.request('/api/billing/refill', {
       method: 'POST',
       body: JSON.stringify({ customerId, amount }),
     });
@@ -219,25 +220,25 @@ export class ApiClient {
 
   // Rate Management
   async getRates() {
-    return this.request('/rates');
+    return this.request('/api/rates');
   }
 
   async createRate(rate: any) {
-    return this.request('/rates', {
+    return this.request('/api/rates', {
       method: 'POST',
       body: JSON.stringify(rate),
     });
   }
 
   async updateRate(rate: any) {
-    return this.request(`/rates/${rate.id}`, {
+    return this.request(`/api/rates/${rate.id}`, {
       method: 'PUT',
       body: JSON.stringify(rate),
     });
   }
 
   async deleteRate(rateId: string) {
-    return this.request(`/rates/${rateId}`, {
+    return this.request(`/api/rates/${rateId}`, {
       method: 'DELETE',
     });
   }
@@ -250,7 +251,7 @@ export class ApiClient {
     if (params?.date) queryParams.append('date', params.date);
     
     const query = queryParams.toString();
-    return this.request(`/call-quality${query ? `?${query}` : ''}`);
+    return this.request(`/api/call-quality${query ? `?${query}` : ''}`);
   }
 
   // SMS Management
@@ -261,29 +262,29 @@ export class ApiClient {
     if (params?.search) queryParams.append('search', params.search);
     
     const query = queryParams.toString();
-    return this.request(`/sms${query ? `?${query}` : ''}`);
+    return this.request(`/api/sms${query ? `?${query}` : ''}`);
   }
 
   async sendSMS(smsData: any) {
-    return this.request('/sms/send', {
+    return this.request('/api/sms/send', {
       method: 'POST',
       body: JSON.stringify(smsData),
     });
   }
 
   async getSMSTemplates() {
-    return this.request('/sms/templates');
+    return this.request('/api/sms/templates');
   }
 
   async createSMSTemplate(template: any) {
-    return this.request('/sms/templates', {
+    return this.request('/api/sms/templates', {
       method: 'POST',
       body: JSON.stringify(template),
     });
   }
 
   async getSMSStats() {
-    return this.request('/sms/stats');
+    return this.request('/api/sms/stats');
   }
 
   logout() {
