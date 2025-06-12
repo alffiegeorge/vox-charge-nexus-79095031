@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -21,11 +20,13 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let db;
+// Global database connection status
+let isDatabaseConnected = false;
 
 async function initializeDatabase() {
   const success = await createDatabasePool();
   if (success) {
+    isDatabaseConnected = true;
     // Create users table if it doesn't exist
     await createUsersTable();
     // Create billing core tables
@@ -274,7 +275,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'iBilling API Server is running',
-    database: 'Connected',
+    database: isDatabaseConnected ? 'Connected' : 'Disconnected',
     asterisk: asteriskManager.isConnected ? 'Connected' : 'Disconnected',
     environment: process.env.NODE_ENV || 'development'
   });
@@ -300,7 +301,7 @@ app.post('/auth/login', async (req, res) => {
     }
 
     // Database availability check
-    if (!db) {
+    if (!isDatabaseConnected) {
       console.error('❌ Database not available');
       return res.status(500).json({ error: 'Database not available' });
     }
