@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -528,5 +529,3 @@ process.on('SIGINT', () => {
 });
 
 startServer().catch(console.error);
-
-</edits_to_apply>
