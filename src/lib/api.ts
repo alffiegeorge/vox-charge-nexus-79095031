@@ -1,5 +1,4 @@
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://172.31.10.10:3001';
 
 export interface LoginCredentials {
   username: string;
