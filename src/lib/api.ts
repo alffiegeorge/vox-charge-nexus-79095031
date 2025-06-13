@@ -32,7 +32,15 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const fullUrl = `${API_BASE_URL}${endpoint}`;
+    // Ensure the endpoint starts with /api/ for API calls (except auth routes)
+    let fullUrl = `${API_BASE_URL}${endpoint}`;
+    if (endpoint.startsWith('/api/') || endpoint.startsWith('/auth/') || endpoint.startsWith('/health')) {
+      fullUrl = `${API_BASE_URL}${endpoint}`;
+    } else {
+      // This shouldn't happen with our current setup, but just in case
+      fullUrl = `${API_BASE_URL}/api${endpoint}`;
+    }
+
     console.log(`API Request: ${options.method || 'GET'} ${fullUrl}`);
     console.log('Request headers:', headers);
     console.log('Auth token exists:', !!token);
