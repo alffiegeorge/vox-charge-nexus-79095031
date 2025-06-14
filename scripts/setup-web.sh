@@ -39,17 +39,29 @@ setup_frontend() {
 setup_nginx() {
     print_status "Configuring Nginx..."
     
+    # Clean existing Nginx configurations
+    print_status "Cleaning existing Nginx configurations..."
+    sudo rm -f /etc/nginx/sites-enabled/default
+    sudo rm -f /etc/nginx/sites-enabled/ibilling
+    sudo rm -f /etc/nginx/sites-available/ibilling
+    
     # Copy Nginx configuration
     sudo cp "$(dirname "$0")/../config/nginx-ibilling.conf" /etc/nginx/sites-available/ibilling
 
     # Enable the site
     sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
-    sudo rm -f /etc/nginx/sites-enabled/default
 
-    # Test and restart Nginx
+    # Test and reload Nginx
     sudo nginx -t
-    sudo systemctl enable nginx
-    sudo systemctl restart nginx
+    if [ $? -eq 0 ]; then
+        print_status "Nginx configuration test passed"
+        sudo systemctl enable nginx
+        sudo systemctl reload nginx
+        print_status "Nginx reloaded successfully"
+    else
+        print_status "Nginx configuration test failed"
+        exit 1
+    fi
 }
 
 setup_web_stack() {
