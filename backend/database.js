@@ -11,7 +11,6 @@ const dbConfig = {
   connectionLimit: 10,
   acquireTimeout: 60000,
   timeout: 60000,
-  reconnect: true,
   idleTimeout: 300000,
   maxIdle: 10,
   enableKeepAlive: true,
@@ -26,6 +25,7 @@ async function createDatabasePool() {
     console.log(`Host: ${dbConfig.host}:${dbConfig.port}`);
     console.log(`Database: ${dbConfig.database}`);
     console.log(`User: ${dbConfig.user}`);
+    console.log(`Password set: ${dbConfig.password ? 'Yes' : 'No (empty)'}`);
     
     db = mysql.createPool(dbConfig);
     
