@@ -105,9 +105,14 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         };
 
         console.log('Updating customer with data:', updateData);
-        const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
+        console.log('Customer ID:', editingCustomer.id);
         
-        // Transform the response to match Customer interface with safe number handling
+        const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
+        console.log('Raw API response:', response);
+        console.log('Response credit_limit type:', typeof response.credit_limit);
+        console.log('Response credit_limit value:', response.credit_limit);
+        
+        // More defensive transformation with extensive logging
         const updatedCustomer: Customer = {
           id: response.id || editingCustomer.id,
           name: response.name || formData.name,
@@ -115,14 +120,34 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
           phone: response.phone || formData.phone,
           company: response.company || formData.company,
           type: response.type || formData.type,
-          balance: typeof response.balance === 'number' ? `$${response.balance.toFixed(2)}` : editingCustomer.balance,
+          balance: (() => {
+            console.log('Processing balance:', response.balance, typeof response.balance);
+            if (typeof response.balance === 'number') {
+              return `$${response.balance.toFixed(2)}`;
+            }
+            return editingCustomer.balance;
+          })(),
           status: response.status || editingCustomer.status,
-          creditLimit: (typeof response.credit_limit === 'number' && response.credit_limit > 0) ? `$${response.credit_limit.toFixed(2)}` : undefined,
+          creditLimit: (() => {
+            console.log('Processing credit_limit:', response.credit_limit, typeof response.credit_limit);
+            if (response.credit_limit !== undefined && response.credit_limit !== null) {
+              if (typeof response.credit_limit === 'number' && response.credit_limit > 0) {
+                return `$${response.credit_limit.toFixed(2)}`;
+              } else if (typeof response.credit_limit === 'string') {
+                const parsed = parseFloat(response.credit_limit);
+                if (!isNaN(parsed) && parsed > 0) {
+                  return `$${parsed.toFixed(2)}`;
+                }
+              }
+            }
+            return undefined;
+          })(),
           address: response.address || formData.address,
           notes: response.notes || formData.notes,
           createdAt: response.created_at || editingCustomer.createdAt
         };
         
+        console.log('Final transformed customer:', updatedCustomer);
         onCustomerUpdated?.(updatedCustomer);
         
         toast({
@@ -158,6 +183,12 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
       onClose();
     } catch (error) {
       console.error('Error saving customer:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack',
+        error: error
+      });
+      
       toast({
         title: "Error",
         description: `Failed to ${editingCustomer ? 'update' : 'create'} customer: ${error instanceof Error ? error.message : 'Unknown error'}`,
