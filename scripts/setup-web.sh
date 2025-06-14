@@ -64,10 +64,33 @@ setup_nginx() {
     fi
 }
 
+restart_backend_service() {
+    print_status "Restarting backend service..."
+    
+    # Restart the backend service
+    sudo systemctl restart ibilling-backend
+    
+    # Wait a moment for the service to start
+    sleep 3
+    
+    # Check and display service status
+    print_status "Checking backend service status..."
+    sudo systemctl status ibilling-backend --no-pager -l
+    
+    # Verify if service is active
+    if sudo systemctl is-active --quiet ibilling-backend; then
+        print_status "✓ Backend service is running"
+    else
+        print_status "✗ Backend service failed to start"
+        exit 1
+    fi
+}
+
 setup_web_stack() {
     setup_nodejs
     setup_frontend
     setup_nginx
+    restart_backend_service
     print_status "Web stack setup completed successfully"
 }
 
