@@ -582,6 +582,295 @@ app.get('/api/asterisk/endpoints', authenticateToken, async (req, res) => {
   }
 });
 
+// DID Management routes
+app.get('/api/dids', authenticateToken, async (req, res) => {
+  try {
+    console.log('=== FETCHING DIDs START ===');
+    console.log('Database connected:', isDatabaseConnected);
+    
+    if (!isDatabaseConnected) {
+      console.error('❌ Database not available');
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    // Create DIDs table if it doesn't exist
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS dids (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        number VARCHAR(20) NOT NULL UNIQUE,
+        customer_id VARCHAR(50),
+        customer_name VARCHAR(100),
+        country VARCHAR(50) NOT NULL,
+        rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        status ENUM('Available', 'Active', 'Suspended') DEFAULT 'Available',
+        type VARCHAR(20) DEFAULT 'Local',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+      )
+    `);
+
+    console.log('Executing query: SELECT * FROM dids ORDER BY created_at DESC');
+    const [dids] = await executeQuery(`
+      SELECT d.*, c.name as customer_name 
+      FROM dids d 
+      LEFT JOIN customers c ON d.customer_id = c.id 
+      ORDER BY d.created_at DESC
+    `);
+    
+    console.log('✓ DIDs fetched successfully:', dids.length, 'records');
+    console.log('Sample DID data:', dids[0] || 'No DIDs found');
+    console.log('=== FETCHING DIDs END ===');
+    
+    res.json(dids);
+  } catch (error) {
+    console.error('=== FETCHING DIDs ERROR ===');
+    console.error('Error fetching DIDs:', error);
+    console.error('Error details:', error.message);
+    console.error('=== FETCHING DIDs ERROR END ===');
+    res.status(500).json({ error: 'Failed to fetch DIDs', details: error.message });
+  }
+});
+
+app.post('/api/dids', authenticateToken, async (req, res) => {
+  try {
+    console.log('Creating DID with request body:', req.body);
+    
+    const { number, customer, country, rate, type, status, customerId, notes } = req.body;
+
+    // Insert DID
+    const result = await executeQuery(
+      `INSERT INTO dids (number, customer_id, customer_name, country, rate, type, status, notes, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        number,
+        customerId || null,
+        customer || 'Unassigned',
+        country,
+        parseFloat(rate.replace('$', '')) || 0,
+        type || 'Local',
+        status || 'Available',
+        notes || null
+      ]
+    );
+
+    console.log('DID created successfully:', number);
+
+    // Return the created DID data
+    const createdDID = {
+      number,
+      customer: customer || 'Unassigned',
+      country,
+      rate,
+      type: type || 'Local',
+      status: status || 'Available',
+      customerId,
+      notes,
+      created_at: new Date().toISOString()
+    };
+
+    res.status(201).json(createdDID);
+  } catch (error) {
+    console.error('Error creating DID:', error);
+    res.status(500).json({ error: 'Failed to create DID', details: error.message });
+  }
+});
+
+app.put('/api/dids/:number', authenticateToken, async (req, res) => {
+  try {
+    const { number } = req.params;
+    const { customer, country, rate, type, status, customerId, notes } = req.body;
+
+    console.log('Updating DID:', number, 'with data:', req.body);
+
+    const result = await executeQuery(
+      `UPDATE dids SET 
+       customer_id = ?, customer_name = ?, country = ?, rate = ?, 
+       type = ?, status = ?, notes = ?, updated_at = NOW()
+       WHERE number = ?`,
+      [
+        customerId || null,
+        customer || 'Unassigned',
+        country,
+        parseFloat(rate.replace('$', '')) || 0,
+        type || 'Local',
+        status || 'Available',
+        notes || null,
+        number
+      ]
+    );
+
+    if (result[0].affectedRows === 0) {
+      return res.status(404).json({ error: 'DID not found' });
+    }
+
+    console.log('DID updated successfully:', number);
+
+    // Return the updated DID data
+    const [updatedDIDs] = await executeQuery(`
+      SELECT d.*, c.name as customer_name 
+      FROM dids d 
+      LEFT JOIN customers c ON d.customer_id = c.id 
+      WHERE d.number = ?
+    `, [number]);
+    
+    res.json(updatedDIDs[0]);
+  } catch (error) {
+    console.error('Error updating DID:', error);
+    res.status(500).json({ error: 'Failed to update DID', details: error.message });
+  }
+});
+
+// Trunk Management routes
+app.get('/api/trunks', authenticateToken, async (req, res) => {
+  try {
+    console.log('=== FETCHING TRUNKS START ===');
+    
+    // Create trunks table if it doesn't exist
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS trunks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        provider VARCHAR(100) NOT NULL,
+        sip_server VARCHAR(255) NOT NULL,
+        port VARCHAR(10) DEFAULT '5060',
+        username VARCHAR(100),
+        password VARCHAR(255),
+        max_channels INT DEFAULT 30,
+        status ENUM('Active', 'Standby', 'Inactive') DEFAULT 'Active',
+        quality ENUM('Excellent', 'Good', 'Fair', 'Poor') DEFAULT 'Good',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
+    const [trunks] = await executeQuery('SELECT * FROM trunks ORDER BY created_at DESC');
+    console.log('✓ Trunks fetched successfully:', trunks.length, 'records');
+    
+    res.json(trunks);
+  } catch (error) {
+    console.error('Error fetching trunks:', error);
+    res.status(500).json({ error: 'Failed to fetch trunks', details: error.message });
+  }
+});
+
+app.post('/api/trunks', authenticateToken, async (req, res) => {
+  try {
+    const { name, provider, sipServer, port, username, password, maxChannels, status, quality, notes } = req.body;
+
+    const result = await executeQuery(
+      `INSERT INTO trunks (name, provider, sip_server, port, username, password, max_channels, status, quality, notes) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, provider, sipServer, port || '5060', username, password, maxChannels, status, quality, notes]
+    );
+
+    console.log('Trunk created successfully:', name);
+    res.status(201).json({ name, provider, sipServer, port, maxChannels, status, quality });
+  } catch (error) {
+    console.error('Error creating trunk:', error);
+    res.status(500).json({ error: 'Failed to create trunk', details: error.message });
+  }
+});
+
+app.put('/api/trunks/:name', authenticateToken, async (req, res) => {
+  try {
+    const { name } = req.params;
+    const { provider, sipServer, port, username, password, maxChannels, status, quality, notes } = req.body;
+
+    const result = await executeQuery(
+      `UPDATE trunks SET provider = ?, sip_server = ?, port = ?, username = ?, 
+       password = ?, max_channels = ?, status = ?, quality = ?, notes = ?, updated_at = NOW()
+       WHERE name = ?`,
+      [provider, sipServer, port, username, password, maxChannels, status, quality, notes, name]
+    );
+
+    if (result[0].affectedRows === 0) {
+      return res.status(404).json({ error: 'Trunk not found' });
+    }
+
+    res.json({ name, provider, sipServer, port, maxChannels, status, quality });
+  } catch (error) {
+    console.error('Error updating trunk:', error);
+    res.status(500).json({ error: 'Failed to update trunk', details: error.message });
+  }
+});
+
+// Routes Management
+app.get('/api/routes', authenticateToken, async (req, res) => {
+  try {
+    // Create routes table if it doesn't exist
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS routes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        pattern VARCHAR(50) NOT NULL,
+        destination VARCHAR(255) NOT NULL,
+        trunk_name VARCHAR(100),
+        priority INT DEFAULT 1,
+        status ENUM('Active', 'Inactive') DEFAULT 'Active',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (trunk_name) REFERENCES trunks(name) ON DELETE SET NULL
+      )
+    `);
+
+    const [routes] = await executeQuery(`
+      SELECT r.*, t.provider as trunk_provider 
+      FROM routes r 
+      LEFT JOIN trunks t ON r.trunk_name = t.name 
+      ORDER BY r.priority ASC, r.created_at DESC
+    `);
+    
+    res.json(routes);
+  } catch (error) {
+    console.error('Error fetching routes:', error);
+    res.status(500).json({ error: 'Failed to fetch routes', details: error.message });
+  }
+});
+
+app.post('/api/routes', authenticateToken, async (req, res) => {
+  try {
+    const { pattern, destination, trunkName, priority, status, notes } = req.body;
+
+    const result = await executeQuery(
+      `INSERT INTO routes (pattern, destination, trunk_name, priority, status, notes) 
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [pattern, destination, trunkName, priority || 1, status || 'Active', notes]
+    );
+
+    const routeId = result[0].insertId;
+    res.status(201).json({ id: routeId, pattern, destination, trunkName, priority, status });
+  } catch (error) {
+    console.error('Error creating route:', error);
+    res.status(500).json({ error: 'Failed to create route', details: error.message });
+  }
+});
+
+app.put('/api/routes/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pattern, destination, trunkName, priority, status, notes } = req.body;
+
+    const result = await executeQuery(
+      `UPDATE routes SET pattern = ?, destination = ?, trunk_name = ?, 
+       priority = ?, status = ?, notes = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [pattern, destination, trunkName, priority, status, notes, id]
+    );
+
+    if (result[0].affectedRows === 0) {
+      return res.status(404).json({ error: 'Route not found' });
+    }
+
+    res.json({ id, pattern, destination, trunkName, priority, status });
+  } catch (error) {
+    console.error('Error updating route:', error);
+    res.status(500).json({ error: 'Failed to update route', details: error.message });
+  }
+});
+
 // Start server
 async function startServer() {
   console.log('Starting iBilling API Server...');
@@ -599,6 +888,17 @@ async function startServer() {
     console.log('  GET /api/customers');
     console.log('  POST /api/customers');
     console.log('  PUT /api/customers/:id');
+    console.log('  GET /api/customers/:id/sip');
+    console.log('  GET /api/asterisk/endpoints');
+    console.log('  GET /api/dids');
+    console.log('  POST /api/dids');
+    console.log('  PUT /api/dids/:number');
+    console.log('  GET /api/trunks');
+    console.log('  POST /api/trunks');
+    console.log('  PUT /api/trunks/:name');
+    console.log('  GET /api/routes');
+    console.log('  POST /api/routes');
+    console.log('  PUT /api/routes/:id');
     console.log('Server is ready to accept connections');
   });
 }
