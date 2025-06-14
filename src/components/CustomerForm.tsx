@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -103,109 +104,53 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
           notes: formData.notes
         };
 
-        console.log('=== CUSTOMER UPDATE START ===');
         console.log('Updating customer with data:', updateData);
-        console.log('Customer ID:', editingCustomer.id);
         
-        try {
-          const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
-          console.log('=== API RESPONSE RECEIVED ===');
-          console.log('Raw API response:', response);
-          console.log('Response type:', typeof response);
-          console.log('Response keys:', Object.keys(response || {}));
-          
-          // Log each field individually
-          console.log('Response fields:');
-          console.log('- id:', response.id, typeof response.id);
-          console.log('- name:', response.name, typeof response.name);
-          console.log('- email:', response.email, typeof response.email);
-          console.log('- phone:', response.phone, typeof response.phone);
-          console.log('- company:', response.company, typeof response.company);
-          console.log('- type:', response.type, typeof response.type);
-          console.log('- balance:', response.balance, typeof response.balance);
-          console.log('- status:', response.status, typeof response.status);
-          console.log('- credit_limit:', response.credit_limit, typeof response.credit_limit);
-          console.log('- address:', response.address, typeof response.address);
-          console.log('- notes:', response.notes, typeof response.notes);
-          console.log('- created_at:', response.created_at, typeof response.created_at);
-          
-          console.log('=== STARTING TRANSFORMATION ===');
-          
-          // Create the updated customer object step by step
-          const updatedCustomer: Customer = {
-            id: response.id || editingCustomer.id,
-            name: response.name || formData.name,
-            email: response.email || formData.email,
-            phone: response.phone || formData.phone,
-            company: response.company || formData.company,
-            type: response.type || formData.type,
-            balance: (() => {
-              console.log('Processing balance:', response.balance, typeof response.balance);
-              try {
-                if (response.balance !== undefined && response.balance !== null) {
-                  if (typeof response.balance === 'number') {
-                    return `$${response.balance.toFixed(2)}`;
-                  } else if (typeof response.balance === 'string') {
-                    const parsed = parseFloat(response.balance);
-                    if (!isNaN(parsed)) {
-                      return `$${parsed.toFixed(2)}`;
-                    }
-                  }
-                }
-                return editingCustomer.balance;
-              } catch (balanceError) {
-                console.error('Error processing balance:', balanceError);
-                return editingCustomer.balance;
+        const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
+        console.log('API Response received:', response);
+        
+        // Create the updated customer object with proper type checking
+        const updatedCustomer: Customer = {
+          id: response.id || editingCustomer.id,
+          name: response.name || formData.name,
+          email: response.email || formData.email,
+          phone: response.phone || formData.phone,
+          company: response.company || formData.company,
+          type: response.type || formData.type,
+          balance: (() => {
+            if (response.balance !== undefined && response.balance !== null) {
+              const balanceNum = typeof response.balance === 'number' ? response.balance : parseFloat(String(response.balance));
+              if (!isNaN(balanceNum)) {
+                return `$${balanceNum.toFixed(2)}`;
               }
-            })(),
-            status: response.status || editingCustomer.status,
-            creditLimit: (() => {
-              console.log('Processing credit_limit:', response.credit_limit, typeof response.credit_limit);
-              try {
-                if (response.credit_limit !== undefined && response.credit_limit !== null) {
-                  if (typeof response.credit_limit === 'number' && response.credit_limit > 0) {
-                    return `$${response.credit_limit.toFixed(2)}`;
-                  } else if (typeof response.credit_limit === 'string') {
-                    const parsed = parseFloat(response.credit_limit);
-                    if (!isNaN(parsed) && parsed > 0) {
-                      return `$${parsed.toFixed(2)}`;
-                    }
-                  }
-                }
-                return undefined;
-              } catch (creditError) {
-                console.error('Error processing credit_limit:', creditError);
-                return undefined;
+            }
+            return editingCustomer.balance;
+          })(),
+          status: response.status || editingCustomer.status,
+          creditLimit: (() => {
+            if (response.credit_limit !== undefined && response.credit_limit !== null) {
+              const creditNum = typeof response.credit_limit === 'number' ? response.credit_limit : parseFloat(String(response.credit_limit));
+              if (!isNaN(creditNum) && creditNum > 0) {
+                return `$${creditNum.toFixed(2)}`;
               }
-            })(),
-            address: response.address || formData.address,
-            notes: response.notes || formData.notes,
-            createdAt: response.created_at || editingCustomer.createdAt
-          };
-          
-          console.log('=== TRANSFORMATION COMPLETE ===');
-          console.log('Final transformed customer:', updatedCustomer);
-          
-          // Call the callback
-          console.log('=== CALLING CALLBACK ===');
-          if (onCustomerUpdated) {
-            onCustomerUpdated(updatedCustomer);
-            console.log('Callback called successfully');
-          }
-          
-          // Show success toast
-          console.log('=== SHOWING SUCCESS TOAST ===');
-          toast({
-            title: "Customer Updated",
-            description: `Customer ${formData.name} has been updated successfully`,
-          });
-          
-          console.log('=== UPDATE PROCESS COMPLETE ===');
-        } catch (apiError) {
-          console.error('=== API CALL ERROR ===');
-          console.error('API Error:', apiError);
-          throw apiError;
+            }
+            return editingCustomer.creditLimit;
+          })(),
+          address: response.address || formData.address,
+          notes: response.notes || formData.notes,
+          createdAt: response.created_at || editingCustomer.createdAt
+        };
+        
+        console.log('Final transformed customer:', updatedCustomer);
+        
+        if (onCustomerUpdated) {
+          onCustomerUpdated(updatedCustomer);
         }
+        
+        toast({
+          title: "Customer Updated",
+          description: `Customer ${formData.name} has been updated successfully`,
+        });
       } else {
         // Create new customer
         const newCustomerData = {
@@ -232,16 +177,9 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         });
       }
       
-      console.log('=== CLOSING FORM ===');
       onClose();
     } catch (error) {
-      console.error('=== FINAL ERROR HANDLER ===');
       console.error('Error saving customer:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error constructor:', error?.constructor?.name);
-      console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
-      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
-      console.error('Full error object:', error);
       
       toast({
         title: "Error",
@@ -249,7 +187,6 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         variant: "destructive"
       });
     } finally {
-      console.log('=== SETTING LOADING FALSE ===');
       setLoading(false);
     }
   };
