@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -128,12 +127,21 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
           })(),
           status: response.status || editingCustomer.status,
           creditLimit: (() => {
+            // Check if credit_limit exists in response and is a valid number
             if (response.credit_limit !== undefined && response.credit_limit !== null) {
               const creditNum = typeof response.credit_limit === 'number' ? response.credit_limit : parseFloat(String(response.credit_limit));
               if (!isNaN(creditNum) && creditNum > 0) {
                 return `$${creditNum.toFixed(2)}`;
               }
             }
+            // If no valid credit_limit in response, check if we have form data
+            if (formData.creditLimit) {
+              const formCreditNum = parseFloat(formData.creditLimit.replace('$', ''));
+              if (!isNaN(formCreditNum) && formCreditNum > 0) {
+                return `$${formCreditNum.toFixed(2)}`;
+              }
+            }
+            // Fall back to existing customer credit limit
             return editingCustomer.creditLimit;
           })(),
           address: response.address || formData.address,
