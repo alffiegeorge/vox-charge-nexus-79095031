@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -106,7 +107,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         console.log('Updating customer with data:', updateData);
         const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
         
-        // Transform the response to match Customer interface
+        // Transform the response to match Customer interface with safe number handling
         const updatedCustomer: Customer = {
           id: response.id || editingCustomer.id,
           name: response.name || formData.name,
@@ -116,7 +117,7 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
           type: response.type || formData.type,
           balance: typeof response.balance === 'number' ? `$${response.balance.toFixed(2)}` : editingCustomer.balance,
           status: response.status || editingCustomer.status,
-          creditLimit: response.credit_limit ? `$${response.credit_limit.toFixed(2)}` : undefined,
+          creditLimit: (typeof response.credit_limit === 'number' && response.credit_limit > 0) ? `$${response.credit_limit.toFixed(2)}` : undefined,
           address: response.address || formData.address,
           notes: response.notes || formData.notes,
           createdAt: response.created_at || editingCustomer.createdAt
