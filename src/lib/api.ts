@@ -23,13 +23,23 @@ export class ApiClient {
   // Make the request method public so it can be used directly
   async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = this.getAuthToken();
+    
+    // Initialize headers properly
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string>),
     };
 
+    // Add any existing headers from options
+    if (options.headers) {
+      Object.assign(headers, options.headers);
+    }
+
+    // Add Authorization header if token exists
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+      console.log('Adding Authorization header with token');
+    } else {
+      console.warn('No auth token found for request to:', endpoint);
     }
 
     // Ensure the endpoint starts with /api/ for API calls (except auth routes)
