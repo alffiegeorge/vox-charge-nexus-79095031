@@ -1,4 +1,7 @@
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const { createDatabasePool, executeQuery } = require('./database');
 
 async function setupRealtimeTables() {
