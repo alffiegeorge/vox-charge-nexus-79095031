@@ -128,7 +128,7 @@ const Customers = () => {
       console.log('Using apiClient to make authenticated request...');
       
       // Use apiClient to make authenticated request
-      const data = await apiClient.request(`/api/customers/${customerId}/sip-credentials`);
+      const data = await apiClient.request<SipCredentials>(`/api/customers/${customerId}/sip-credentials`);
       console.log('SIP credentials received:', data);
       setSipCredentials(data);
     } catch (error) {
