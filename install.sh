@@ -12,6 +12,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# ... keep existing code (utility functions, check_and_setup_sudo, create_config_files, setup_database, setup_odbc functions) the same ...
+
 # Utility functions
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -1181,6 +1183,52 @@ perform_system_checks() {
     fi
 }
 
+finalize_installation() {
+    print_status "Finalizing installation..."
+    
+    # Copy updated Nginx configuration from git repository
+    print_status "Updating Nginx configuration with latest version..."
+    sudo cp config/nginx-ibilling.conf /etc/nginx/sites-available/ibilling
+    
+    # Test and reload Nginx
+    print_status "Testing Nginx configuration..."
+    sudo nginx -t
+    if [ $? -eq 0 ]; then
+        print_status "✓ Nginx configuration test passed"
+        print_status "Reloading Nginx..."
+        sudo systemctl reload nginx
+        print_status "✓ Nginx reloaded successfully"
+    else
+        print_error "✗ Nginx configuration test failed"
+        return 1
+    fi
+    
+    # Restart backend service
+    print_status "Restarting backend service..."
+    sudo systemctl restart ibilling-backend
+    
+    # Wait for backend to start and verify
+    sleep 5
+    if sudo systemctl is-active --quiet ibilling-backend; then
+        print_status "✓ Backend service restarted successfully"
+        
+        # Test API endpoint
+        sleep 2
+        if curl -s http://localhost:3001/health > /dev/null; then
+            print_status "✓ Backend API is responding"
+        else
+            print_warning "⚠ Backend service is running but API not responding yet"
+        fi
+    else
+        print_error "✗ Backend service failed to restart"
+        print_status "Checking service logs..."
+        sudo journalctl -u ibilling-backend --no-pager -n 20
+        return 1
+    fi
+    
+    print_status "Installation finalization completed successfully"
+}
+
 display_installation_summary() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -1323,11 +1371,15 @@ main() {
     print_status "Populating database..."
     populate_database "${MYSQL_ROOT_PASSWORD}"
 
-    # 12. Perform final system checks and display summary
+    # 12. Finalize installation with Nginx config update and service restart
+    print_status "Finalizing installation..."
+    finalize_installation
+
+    # 13. Perform final system checks and display summary
     perform_system_checks
     display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 13. Cleanup temporary files
+    # 14. Cleanup temporary files
     sudo rm -rf /tmp/ibilling-config
 
     print_status "Installation completed successfully with full Asterisk billing integration!"
