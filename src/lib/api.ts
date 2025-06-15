@@ -20,7 +20,8 @@ export class ApiClient {
     return localStorage.getItem('authToken');
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // Make the request method public so it can be used directly
+  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = this.getAuthToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

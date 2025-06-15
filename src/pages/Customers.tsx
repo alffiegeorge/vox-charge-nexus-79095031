@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -126,27 +125,18 @@ const Customers = () => {
     setLoadingSipCredentials(true);
     try {
       console.log('Fetching SIP credentials for customer:', customerId);
-      const response = await fetch(`/api/customers/${customerId}/sip-credentials`);
+      console.log('Using apiClient to make authenticated request...');
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log('SIP credentials received:', data);
-        setSipCredentials(data);
-      } else {
-        console.log('No SIP credentials found for customer');
-        setSipCredentials(null);
-        toast({
-          title: "No SIP Credentials",
-          description: "No SIP credentials found for this customer. They may need to be created.",
-          variant: "destructive",
-        });
-      }
+      // Use apiClient to make authenticated request
+      const data = await apiClient.request(`/api/customers/${customerId}/sip-credentials`);
+      console.log('SIP credentials received:', data);
+      setSipCredentials(data);
     } catch (error) {
       console.error('Error fetching SIP credentials:', error);
       setSipCredentials(null);
       toast({
-        title: "Error",
-        description: "Failed to fetch SIP credentials",
+        title: "No SIP Credentials",
+        description: "No SIP credentials found for this customer. They may need to be created.",
         variant: "destructive",
       });
     } finally {
