@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,7 +41,7 @@ interface CustomerApiResponse {
   type?: string;
   balance?: number;
   status?: string;
-  credit_limit?: number;
+  credit_limit?: number | string | null;
   address?: string;
   notes?: string;
   created_at?: string;
@@ -108,6 +109,28 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         const response = await apiClient.updateCustomer(editingCustomer.id, updateData) as CustomerApiResponse;
         console.log('API Response received:', response);
         
+        // Helper function to safely convert to number and format as currency
+        const formatCurrency = (value: any): string => {
+          if (value === null || value === undefined || value === '') {
+            return '$0.00';
+          }
+          
+          let numValue: number;
+          if (typeof value === 'number') {
+            numValue = value;
+          } else if (typeof value === 'string') {
+            numValue = parseFloat(value.replace('$', '').replace(',', ''));
+          } else {
+            numValue = 0;
+          }
+          
+          if (isNaN(numValue)) {
+            numValue = 0;
+          }
+          
+          return `$${numValue.toFixed(2)}`;
+        };
+        
         // Create the updated customer object with proper type checking
         const updatedCustomer: Customer = {
           id: response.id || editingCustomer.id,
@@ -116,33 +139,19 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
           phone: response.phone || formData.phone,
           company: response.company || formData.company,
           type: response.type || formData.type,
-          balance: (() => {
-            if (response.balance !== undefined && response.balance !== null) {
-              const balanceNum = typeof response.balance === 'number' ? response.balance : parseFloat(String(response.balance));
-              if (!isNaN(balanceNum)) {
-                return `$${balanceNum.toFixed(2)}`;
-              }
-            }
-            return editingCustomer.balance;
-          })(),
+          balance: formatCurrency(response.balance || editingCustomer.balance),
           status: response.status || editingCustomer.status,
           creditLimit: (() => {
-            // Check if credit_limit exists in response and is a valid number
+            // First try to use the response credit_limit
             if (response.credit_limit !== undefined && response.credit_limit !== null) {
-              const creditNum = typeof response.credit_limit === 'number' ? response.credit_limit : parseFloat(String(response.credit_limit));
-              if (!isNaN(creditNum) && creditNum > 0) {
-                return `$${creditNum.toFixed(2)}`;
-              }
+              return formatCurrency(response.credit_limit);
             }
-            // If no valid credit_limit in response, check if we have form data
+            // Then try form data
             if (formData.creditLimit) {
-              const formCreditNum = parseFloat(formData.creditLimit.replace('$', ''));
-              if (!isNaN(formCreditNum) && formCreditNum > 0) {
-                return `$${formCreditNum.toFixed(2)}`;
-              }
+              return formatCurrency(formData.creditLimit);
             }
-            // Fall back to existing customer credit limit
-            return editingCustomer.creditLimit;
+            // Finally fall back to existing customer credit limit
+            return editingCustomer.creditLimit || '$0.00';
           })(),
           address: response.address || formData.address,
           notes: response.notes || formData.notes,
