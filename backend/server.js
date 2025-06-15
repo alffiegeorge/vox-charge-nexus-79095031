@@ -566,11 +566,43 @@ app.get('/api/customers/:id/sip-credentials', authenticateToken, async (req, res
     const { id } = req.params;
     console.log('Fetching SIP credentials for customer:', id);
     
-    // Query the ps_endpoints table for this customer's SIP configuration
-    const [endpoints] = await executeQuery(
+    // First try to get from sip_credentials table (created by asterisk-manager)
+    try {
+      const [sipCreds] = await executeQuery(
+        'SELECT * FROM sip_credentials WHERE customer_id = ?',
+        [id]
+      );
+      
+      if (sipCreds.length > 0) {
+        const cred = sipCreds[0];
+        const sipCredentials = {
+          sip_username: cred.sip_username,
+          sip_password: cred.sip_password,
+          sip_domain: cred.sip_domain,
+          status: cred.status,
+          created_at: cred.created_at
+        };
+        
+        console.log('SIP credentials found in sip_credentials table for customer:', id);
+        return res.json(sipCredentials);
+      }
+    } catch (error) {
+      console.log('sip_credentials table not found or error, trying PJSIP tables...');
+    }
+    
+    // Try with customer ID as-is
+    let [endpoints] = await executeQuery(
       'SELECT * FROM ps_endpoints WHERE id = ?',
       [id]
     );
+    
+    // If not found, try with lowercase customer ID
+    if (endpoints.length === 0) {
+      [endpoints] = await executeQuery(
+        'SELECT * FROM ps_endpoints WHERE id = ?',
+        [id.toLowerCase()]
+      );
+    }
     
     if (endpoints.length === 0) {
       console.log('No SIP endpoint found for customer:', id);
@@ -578,11 +610,12 @@ app.get('/api/customers/:id/sip-credentials', authenticateToken, async (req, res
     }
     
     const endpoint = endpoints[0];
+    const endpointId = endpoint.id;
     
     // Query the ps_auths table for authentication details
     const [auths] = await executeQuery(
       'SELECT * FROM ps_auths WHERE id = ?',
-      [id]
+      [endpointId]
     );
     
     if (auths.length === 0) {
@@ -594,14 +627,14 @@ app.get('/api/customers/:id/sip-credentials', authenticateToken, async (req, res
     
     // Return the SIP credentials
     const sipCredentials = {
-      sip_username: auth.username || id,
+      sip_username: auth.username || endpointId,
       sip_password: auth.password,
       sip_domain: process.env.ASTERISK_HOST || 'localhost',
       status: 'active',
       created_at: endpoint.created_at || new Date().toISOString()
     };
     
-    console.log('SIP credentials found for customer:', id);
+    console.log('SIP credentials found in PJSIP tables for customer:', id);
     res.json(sipCredentials);
     
   } catch (error) {
