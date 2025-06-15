@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -15,15 +16,24 @@ const { setupRealtimeTables } = require('./realtime-setup');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Middleware - ORDER MATTERS!
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.path.includes('/api/')) {
+  if (req.path.includes('/api/') || req.path.includes('/auth/')) {
     console.log('API Request:', req.method, req.path);
     console.log('Headers:', req.headers);
     if (req.body && Object.keys(req.body).length > 0) {
@@ -302,11 +312,13 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Authentication routes
+// Authentication routes - FIXED ROUTE DEFINITION
 app.post('/auth/login', async (req, res) => {
   console.log('\n=== LOGIN ATTEMPT START ===');
   console.log('Request headers:', req.headers);
   console.log('Request body:', req.body);
+  console.log('Request method:', req.method);
+  console.log('Request path:', req.path);
   
   try {
     const { username, password } = req.body;
@@ -879,7 +891,7 @@ async function startServer() {
   
   await initializeDatabase();
   
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 iBilling API Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log('Available API routes:');
