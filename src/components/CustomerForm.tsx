@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -185,14 +186,26 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         console.log('Creating customer with data:', newCustomerData);
         
         try {
-          const createdCustomer = await apiClient.createCustomer(newCustomerData);
-          console.log('Customer created successfully:', createdCustomer);
+          const response = await apiClient.createCustomer(newCustomerData);
+          console.log('Customer created successfully:', response);
+          
+          // Type assertion to handle unknown response type
+          const createdCustomer = response as CustomerApiResponse;
           
           // Transform the response to match the expected format
           const transformedCustomer = {
-            ...createdCustomer,
+            id: createdCustomer.id || '',
+            name: createdCustomer.name || formData.name,
+            email: createdCustomer.email || formData.email,
+            phone: createdCustomer.phone || formData.phone,
+            company: createdCustomer.company || formData.company,
+            type: createdCustomer.type || formData.type,
             balance: `$${(createdCustomer.balance || 0).toFixed(2)}`,
-            creditLimit: createdCustomer.credit_limit ? `$${createdCustomer.credit_limit.toFixed(2)}` : '$0.00'
+            status: createdCustomer.status || 'Active',
+            creditLimit: createdCustomer.credit_limit ? `$${Number(createdCustomer.credit_limit).toFixed(2)}` : '$0.00',
+            address: createdCustomer.address || formData.address,
+            notes: createdCustomer.notes || formData.notes,
+            createdAt: createdCustomer.created_at
           };
           
           console.log('Transformed customer for callback:', transformedCustomer);
