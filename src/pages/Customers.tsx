@@ -125,20 +125,38 @@ const Customers = () => {
     setLoadingSipCredentials(true);
     try {
       console.log('Fetching SIP credentials for customer:', customerId);
-      console.log('Using apiClient to make authenticated request...');
+      console.log('Using apiClient with authentication...');
       
-      // Use apiClient to make authenticated request
+      // Check if we have an auth token
+      const authToken = localStorage.getItem('authToken');
+      console.log('Auth token exists:', !!authToken);
+      
+      if (!authToken) {
+        throw new Error('No authentication token found. Please log in again.');
+      }
+      
+      // Use apiClient.request to make authenticated request
       const data = await apiClient.request<SipCredentials>(`/api/customers/${customerId}/sip-credentials`);
       console.log('SIP credentials received:', data);
       setSipCredentials(data);
     } catch (error) {
       console.error('Error fetching SIP credentials:', error);
       setSipCredentials(null);
-      toast({
-        title: "No SIP Credentials",
-        description: "No SIP credentials found for this customer. They may need to be created.",
-        variant: "destructive",
-      });
+      
+      // Check if it's an auth error
+      if (error instanceof Error && error.message.includes('401')) {
+        toast({
+          title: "Authentication Error",
+          description: "Please log in again to view SIP credentials.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "No SIP Credentials",
+          description: "No SIP credentials found for this customer. They may need to be created.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoadingSipCredentials(false);
     }
