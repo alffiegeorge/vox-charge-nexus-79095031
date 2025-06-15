@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -184,17 +183,43 @@ const CustomerForm = ({ onClose, onCustomerCreated, onCustomerUpdated, editingCu
         };
 
         console.log('Creating customer with data:', newCustomerData);
-        const createdCustomer = await apiClient.createCustomer(newCustomerData);
         
-        onCustomerCreated?.(createdCustomer);
-        
-        toast({
-          title: "Customer Created",
-          description: `Customer ${formData.name} has been created successfully`,
-        });
+        try {
+          const createdCustomer = await apiClient.createCustomer(newCustomerData);
+          console.log('Customer created successfully:', createdCustomer);
+          
+          // Transform the response to match the expected format
+          const transformedCustomer = {
+            ...createdCustomer,
+            balance: `$${(createdCustomer.balance || 0).toFixed(2)}`,
+            creditLimit: createdCustomer.credit_limit ? `$${createdCustomer.credit_limit.toFixed(2)}` : '$0.00'
+          };
+          
+          console.log('Transformed customer for callback:', transformedCustomer);
+          
+          if (onCustomerCreated) {
+            onCustomerCreated(transformedCustomer);
+          }
+          
+          toast({
+            title: "Customer Created",
+            description: `Customer ${formData.name} has been created successfully. SIP endpoint is being configured in the background.`,
+          });
+          
+          // Close the form after successful creation
+          onClose();
+          
+        } catch (createError) {
+          console.error('Customer creation failed:', createError);
+          throw createError;
+        }
       }
       
-      onClose();
+      // Only close for updates here, creates are closed above
+      if (editingCustomer) {
+        onClose();
+      }
+      
     } catch (error) {
       console.error('Error saving customer:', error);
       

@@ -426,7 +426,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Customer routes - Updated to include Asterisk integration
+// Customer routes - Updated to handle Asterisk integration gracefully
 app.get('/api/customers', authenticateToken, async (req, res) => {
   try {
     console.log('=== FETCHING CUSTOMERS START ===');
@@ -485,17 +485,7 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
 
     console.log('Customer created successfully with ID:', customerId);
 
-    // Create PJSIP endpoint for the customer
-    let sipCredentials = null;
-    try {
-      sipCredentials = await asteriskManager.createPJSIPEndpoint(customerId, { name, email, phone });
-      console.log('✓ PJSIP endpoint created for customer:', customerId);
-    } catch (asteriskError) {
-      console.warn('⚠ Failed to create PJSIP endpoint:', asteriskError.message);
-      console.warn('⚠ Customer created but SIP endpoint creation failed');
-    }
-
-    // Return the created customer data with SIP info
+    // Prepare the response data first
     const createdCustomer = {
       id: customerId,
       name,
@@ -508,11 +498,31 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
       address,
       notes,
       status: status || 'Active',
-      created_at: new Date().toISOString(),
-      sip_credentials: sipCredentials
+      created_at: new Date().toISOString()
     };
 
+    // Try to create PJSIP endpoint asynchronously (non-blocking)
+    // This won't block the response if it fails
+    setImmediate(async () => {
+      try {
+        const sipCredentials = await asteriskManager.createPJSIPEndpoint(customerId, { name, email, phone });
+        console.log('✓ PJSIP endpoint created for customer:', customerId);
+        
+        // Update the customer record with SIP info if successful
+        await executeQuery(
+          'UPDATE customers SET notes = CONCAT(COALESCE(notes, ""), "\nSIP Username: ", ?) WHERE id = ?',
+          [sipCredentials.sipUsername, customerId]
+        );
+      } catch (asteriskError) {
+        console.warn('⚠ Failed to create PJSIP endpoint for customer', customerId, ':', asteriskError.message);
+        console.warn('⚠ Customer created successfully but SIP endpoint creation failed');
+      }
+    });
+
+    // Always send the response immediately
+    console.log('Sending response for created customer:', customerId);
     res.status(201).json(createdCustomer);
+    
   } catch (error) {
     console.error('Error creating customer:', error);
     res.status(500).json({ error: 'Failed to create customer', details: error.message });
