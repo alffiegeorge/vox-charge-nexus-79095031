@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -24,8 +23,13 @@ app.use(cors({
   credentials: true
 }));
 
-// Handle preflight requests
-app.options('*', cors());
+// Handle preflight requests FIRST
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).send();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -301,31 +305,19 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Routes
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'iBilling API Server is running',
-    database: isDatabaseConnected ? 'Connected' : 'Disconnected',
-    asterisk: asteriskManager.isConnected ? 'Connected' : 'Disconnected',
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Authentication routes - FIXED ROUTE DEFINITION
+// Routes - AUTHENTICATION FIRST
 app.post('/auth/login', async (req, res) => {
-  console.log('\n=== LOGIN ATTEMPT START ===');
-  console.log('Request headers:', req.headers);
-  console.log('Request body:', req.body);
-  console.log('Request method:', req.method);
-  console.log('Request path:', req.path);
+  console.log('\n=== LOGIN ENDPOINT HIT ===');
+  console.log('Method:', req.method);
+  console.log('Path:', req.path);
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
   
   try {
     const { username, password } = req.body;
     
     console.log('Username:', username);
     console.log('Password provided:', password ? 'Yes' : 'No');
-    console.log('Password length:', password ? password.length : 0);
 
     // Input validation
     if (!username || !password) {
@@ -342,7 +334,7 @@ app.post('/auth/login', async (req, res) => {
     console.log('✓ Database is available');
     console.log('Querying database for user:', username);
     
-    // Database query with proper error handling
+    // Database query
     let users;
     try {
       [users] = await executeQuery(
@@ -362,12 +354,7 @@ app.post('/auth/login', async (req, res) => {
     }
 
     const user = users[0];
-    console.log('✓ User found:');
-    console.log('- ID:', user.id);
-    console.log('- Username:', user.username);
-    console.log('- Role:', user.role);
-    console.log('- Status:', user.status);
-    console.log('- Email:', user.email);
+    console.log('✓ User found:', user.username, 'Role:', user.role);
     
     // Status check
     if (user.status !== 'active') {
@@ -375,17 +362,10 @@ app.post('/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Account is not active' });
     }
     
-    console.log('✓ User account is active');
-    console.log('Comparing passwords...');
-    console.log('Input password:', password);
-    console.log('Stored hash exists:', user.password ? 'Yes' : 'No');
-    console.log('Stored hash length:', user.password ? user.password.length : 0);
-    
-    // Password comparison with error handling
+    // Password comparison
     let isValidPassword;
     try {
       isValidPassword = await bcrypt.compare(password, user.password);
-      console.log('✓ Password comparison completed');
       console.log('Password valid:', isValidPassword);
     } catch (bcryptError) {
       console.error('❌ Password comparison failed:', bcryptError);
@@ -393,13 +373,13 @@ app.post('/auth/login', async (req, res) => {
     }
 
     if (!isValidPassword) {
-      console.log('❌ Password comparison failed - invalid credentials');
+      console.log('❌ Invalid credentials');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     console.log('✅ Login successful for user:', username);
 
-    // Token generation with error handling
+    // Token generation
     let token;
     try {
       token = jwt.sign(
@@ -424,21 +404,26 @@ app.post('/auth/login', async (req, res) => {
     };
 
     console.log('✅ Sending successful response');
-    console.log('=== LOGIN ATTEMPT END ===\n');
-    
     res.json(response);
 
   } catch (error) {
-    console.error('\n❌ UNEXPECTED LOGIN ERROR:');
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('=== LOGIN ATTEMPT END (ERROR) ===\n');
-    
+    console.error('❌ UNEXPECTED LOGIN ERROR:', error);
     res.status(500).json({ 
       error: 'Internal server error',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
+});
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'iBilling API Server is running',
+    database: isDatabaseConnected ? 'Connected' : 'Disconnected',
+    asterisk: asteriskManager.isConnected ? 'Connected' : 'Disconnected',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Customer routes - Updated to include Asterisk integration
@@ -463,7 +448,6 @@ app.get('/api/customers', authenticateToken, async (req, res) => {
     console.error('=== FETCHING CUSTOMERS ERROR ===');
     console.error('Error fetching customers:', error);
     console.error('Error details:', error.message);
-    console.error('Error stack:', error.stack);
     console.error('=== FETCHING CUSTOMERS ERROR END ===');
     res.status(500).json({ error: 'Failed to fetch customers', details: error.message });
   }
