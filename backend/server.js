@@ -561,6 +561,55 @@ app.put('/api/customers/:id', authenticateToken, async (req, res) => {
 });
 
 // New route to get SIP credentials for a customer
+app.get('/api/customers/:id/sip-credentials', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('Fetching SIP credentials for customer:', id);
+    
+    // Query the ps_endpoints table for this customer's SIP configuration
+    const [endpoints] = await executeQuery(
+      'SELECT * FROM ps_endpoints WHERE id = ?',
+      [id]
+    );
+    
+    if (endpoints.length === 0) {
+      console.log('No SIP endpoint found for customer:', id);
+      return res.status(404).json({ error: 'No SIP credentials found for this customer' });
+    }
+    
+    const endpoint = endpoints[0];
+    
+    // Query the ps_auths table for authentication details
+    const [auths] = await executeQuery(
+      'SELECT * FROM ps_auths WHERE id = ?',
+      [id]
+    );
+    
+    if (auths.length === 0) {
+      console.log('No SIP auth found for customer:', id);
+      return res.status(404).json({ error: 'No SIP authentication found for this customer' });
+    }
+    
+    const auth = auths[0];
+    
+    // Return the SIP credentials
+    const sipCredentials = {
+      sip_username: auth.username || id,
+      sip_password: auth.password,
+      sip_domain: process.env.ASTERISK_HOST || 'localhost',
+      status: 'active',
+      created_at: endpoint.created_at || new Date().toISOString()
+    };
+    
+    console.log('SIP credentials found for customer:', id);
+    res.json(sipCredentials);
+    
+  } catch (error) {
+    console.error('Error fetching SIP credentials:', error);
+    res.status(500).json({ error: 'Failed to fetch SIP credentials', details: error.message });
+  }
+});
+
 app.get('/api/customers/:id/sip', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -894,6 +943,7 @@ async function startServer() {
     console.log('  GET /api/customers');
     console.log('  POST /api/customers');
     console.log('  PUT /api/customers/:id');
+    console.log('  GET /api/customers/:id/sip-credentials');
     console.log('  GET /api/customers/:id/sip');
     console.log('  GET /api/asterisk/endpoints');
     console.log('  GET /api/dids');
