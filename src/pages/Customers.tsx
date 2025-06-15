@@ -125,35 +125,51 @@ const Customers = () => {
     setLoadingSipCredentials(true);
     try {
       console.log('Fetching SIP credentials for customer:', customerId);
-      console.log('Using apiClient with authentication...');
       
       // Check if we have an auth token
       const authToken = localStorage.getItem('authToken');
       console.log('Auth token exists:', !!authToken);
+      console.log('Auth token length:', authToken?.length || 0);
       
       if (!authToken) {
         throw new Error('No authentication token found. Please log in again.');
       }
       
+      // Log the full request details
+      console.log('Making authenticated request to:', `/api/customers/${customerId}/sip-credentials`);
+      
       // Use apiClient.request to make authenticated request
       const data = await apiClient.request<SipCredentials>(`/api/customers/${customerId}/sip-credentials`);
-      console.log('SIP credentials received:', data);
+      console.log('SIP credentials received successfully:', data);
       setSipCredentials(data);
     } catch (error) {
       console.error('Error fetching SIP credentials:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        type: typeof error,
+        isError: error instanceof Error
+      });
+      
       setSipCredentials(null);
       
-      // Check if it's an auth error
-      if (error instanceof Error && error.message.includes('401')) {
+      // Check if it's an auth error (401)
+      if (error instanceof Error && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
+        console.log('Authentication error detected - token may be expired');
         toast({
           title: "Authentication Error",
-          description: "Please log in again to view SIP credentials.",
+          description: "Your session has expired. Please log in again to view SIP credentials.",
+          variant: "destructive",
+        });
+      } else if (error instanceof Error && error.message.includes('404')) {
+        toast({
+          title: "No SIP Credentials",
+          description: "No SIP credentials found for this customer. They may need to be created.",
           variant: "destructive",
         });
       } else {
         toast({
-          title: "No SIP Credentials",
-          description: "No SIP credentials found for this customer. They may need to be created.",
+          title: "Error Loading SIP Credentials",
+          description: `Failed to load SIP credentials: ${error instanceof Error ? error.message : 'Unknown error'}`,
           variant: "destructive",
         });
       }
