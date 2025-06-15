@@ -1,4 +1,3 @@
-
 const AsteriskManager = require('asterisk-manager');
 const { executeQuery } = require('./database');
 
@@ -76,46 +75,35 @@ class AsteriskIntegration {
       const sipPassword = this.generateSipPassword();
       const sipDomain = process.env.SIP_DOMAIN || 'localhost';
       
-      // Create PJSIP endpoint configuration
-      const endpointConfig = {
-        type: 'endpoint',
-        context: 'from-internal',
-        disallow: 'all',
-        allow: 'ulaw,alaw,g722,g729',
-        auth: sipUsername,
-        aors: sipUsername,
-        direct_media: 'no',
-        ice_support: 'yes',
-        force_rport: 'yes',
-        rewrite_contact: 'yes',
-        rtp_symmetric: 'yes',
-        send_rpid: 'yes',
-        send_pai: 'yes',
-        trust_id_inbound: 'yes',
-        callerid: `"${customerData.name}" <${sipUsername}>`
-      };
-
-      // Create AUTH configuration
-      const authConfig = {
-        type: 'auth',
-        auth_type: 'userpass',
-        username: sipUsername,
-        password: sipPassword
-      };
-
-      // Create AOR configuration
-      const aorConfig = {
-        type: 'aor',
-        max_contacts: '1',
-        remove_existing: 'yes',
-        qualify_frequency: '60'
-      };
-
       // Store SIP credentials in database
       await this.storeSipCredentials(customerId, sipUsername, sipPassword, sipDomain);
       
-      // Write configurations to Asterisk
-      await this.writePJSIPConfig(sipUsername, endpointConfig, authConfig, aorConfig);
+      // Create PJSIP endpoint in realtime table
+      await executeQuery(`
+        INSERT INTO ps_endpoints (id, transport, aors, auth, context, disallow, allow, 
+                                 direct_media, ice_support, force_rport, rewrite_contact, 
+                                 rtp_symmetric, send_rpid, send_pai, trust_id_inbound, callerid)
+        VALUES (?, 'transport-udp', ?, ?, 'from-internal', 'all', 'ulaw,alaw,g722,g729',
+                'no', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', ?)
+        ON DUPLICATE KEY UPDATE
+        aors = VALUES(aors), auth = VALUES(auth), callerid = VALUES(callerid)
+      `, [sipUsername, sipUsername, sipUsername, `"${customerData.name}" <${sipUsername}>`]);
+
+      // Create PJSIP auth in realtime table
+      await executeQuery(`
+        INSERT INTO ps_auths (id, auth_type, username, password)
+        VALUES (?, 'userpass', ?, ?)
+        ON DUPLICATE KEY UPDATE
+        username = VALUES(username), password = VALUES(password)
+      `, [sipUsername, sipUsername, sipPassword]);
+
+      // Create PJSIP AOR in realtime table
+      await executeQuery(`
+        INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency)
+        VALUES (?, 1, 'yes', 60)
+        ON DUPLICATE KEY UPDATE
+        max_contacts = VALUES(max_contacts), remove_existing = VALUES(remove_existing)
+      `, [sipUsername]);
       
       // Reload PJSIP configuration
       await this.reloadPJSIP();
@@ -172,68 +160,6 @@ class AsteriskIntegration {
       console.log(`✓ SIP credentials stored for customer ${customerId}`);
     } catch (error) {
       console.error('Failed to store SIP credentials:', error);
-      throw error;
-    }
-  }
-
-  async writePJSIPConfig(username, endpointConfig, authConfig, aorConfig) {
-    try {
-      // In a real implementation, you would write to Asterisk configuration files
-      // For now, we'll use AMI commands to add the configuration dynamically
-      
-      // Note: Dynamic PJSIP configuration requires Asterisk realtime
-      // This is a simplified version - in production you'd want to write to
-      // pjsip.conf or use Asterisk realtime with database backend
-      
-      console.log(`Writing PJSIP configuration for ${username}...`);
-      console.log('Endpoint config:', endpointConfig);
-      console.log('Auth config:', authConfig);
-      console.log('AOR config:', aorConfig);
-      
-      // For demonstration, we'll store in our database which can be read by Asterisk realtime
-      await this.storeAsteriskConfig(username, 'endpoint', endpointConfig);
-      await this.storeAsteriskConfig(username, 'auth', authConfig);
-      await this.storeAsteriskConfig(username, 'aor', aorConfig);
-      
-    } catch (error) {
-      console.error('Failed to write PJSIP configuration:', error);
-      throw error;
-    }
-  }
-
-  async storeAsteriskConfig(objectName, objectType, config) {
-    try {
-      // Create asterisk_config table for realtime configuration
-      await executeQuery(`
-        CREATE TABLE IF NOT EXISTS asterisk_config (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          object_name VARCHAR(50) NOT NULL,
-          object_type VARCHAR(20) NOT NULL,
-          config_key VARCHAR(50) NOT NULL,
-          config_value VARCHAR(255) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_object (object_name, object_type),
-          UNIQUE KEY unique_config (object_name, object_type, config_key)
-        )
-      `);
-
-      // Delete existing config for this object
-      await executeQuery(
-        'DELETE FROM asterisk_config WHERE object_name = ? AND object_type = ?',
-        [objectName, objectType]
-      );
-
-      // Insert new configuration
-      for (const [key, value] of Object.entries(config)) {
-        await executeQuery(
-          'INSERT INTO asterisk_config (object_name, object_type, config_key, config_value) VALUES (?, ?, ?, ?)',
-          [objectName, objectType, key, value]
-        );
-      }
-
-      console.log(`✓ Stored ${objectType} configuration for ${objectName}`);
-    } catch (error) {
-      console.error('Failed to store Asterisk configuration:', error);
       throw error;
     }
   }
@@ -311,17 +237,14 @@ class AsteriskIntegration {
 
       const username = credentials.sip_username;
       
-      // Delete from asterisk_config table
-      await executeQuery(
-        'DELETE FROM asterisk_config WHERE object_name = ?',
-        [username]
-      );
+      // Delete from PJSIP realtime tables
+      await executeQuery('DELETE FROM ps_endpoints WHERE id = ?', [username]);
+      await executeQuery('DELETE FROM ps_auths WHERE id = ?', [username]);
+      await executeQuery('DELETE FROM ps_aors WHERE id = ?', [username]);
+      await executeQuery('DELETE FROM ps_contacts WHERE endpoint = ?', [username]);
 
       // Delete SIP credentials
-      await executeQuery(
-        'DELETE FROM sip_credentials WHERE customer_id = ?',
-        [customerId]
-      );
+      await executeQuery('DELETE FROM sip_credentials WHERE customer_id = ?', [customerId]);
 
       // Reload PJSIP
       await this.reloadPJSIP();

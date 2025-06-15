@@ -11,6 +11,80 @@ async function setupRealtimeTables() {
       throw new Error('Failed to connect to database');
     }
     
+    // Create PJSIP endpoints table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS ps_endpoints (
+        id VARCHAR(40) NOT NULL PRIMARY KEY,
+        transport VARCHAR(40),
+        aors VARCHAR(200),
+        auth VARCHAR(40),
+        context VARCHAR(40) DEFAULT 'from-internal',
+        disallow VARCHAR(200) DEFAULT 'all',
+        allow VARCHAR(200) DEFAULT 'ulaw,alaw,g722',
+        direct_media ENUM('yes','no') DEFAULT 'no',
+        connected_line_method ENUM('invite','update') DEFAULT 'invite',
+        direct_media_method ENUM('invite','update') DEFAULT 'invite',
+        direct_media_glare_mitigation ENUM('none','outgoing','incoming') DEFAULT 'none',
+        disable_direct_media_on_nat ENUM('yes','no') DEFAULT 'no',
+        dtmf_mode ENUM('rfc4733','inband','info','auto','auto_info') DEFAULT 'rfc4733',
+        ice_support ENUM('yes','no') DEFAULT 'yes',
+        force_rport ENUM('yes','no') DEFAULT 'yes',
+        rewrite_contact ENUM('yes','no') DEFAULT 'yes',
+        rtp_symmetric ENUM('yes','no') DEFAULT 'yes',
+        send_rpid ENUM('yes','no') DEFAULT 'yes',
+        send_pai ENUM('yes','no') DEFAULT 'yes',
+        trust_id_inbound ENUM('yes','no') DEFAULT 'yes',
+        callerid VARCHAR(40)
+      )
+    `);
+    
+    // Create PJSIP auths table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS ps_auths (
+        id VARCHAR(40) NOT NULL PRIMARY KEY,
+        auth_type ENUM('userpass','md5') DEFAULT 'userpass',
+        password VARCHAR(80),
+        username VARCHAR(40),
+        realm VARCHAR(40)
+      )
+    `);
+    
+    // Create PJSIP aors table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS ps_aors (
+        id VARCHAR(40) NOT NULL PRIMARY KEY,
+        contact VARCHAR(255),
+        default_expiration INT DEFAULT 3600,
+        mailboxes VARCHAR(80),
+        max_contacts INT DEFAULT 1,
+        minimum_expiration INT DEFAULT 60,
+        remove_existing ENUM('yes','no') DEFAULT 'yes',
+        qualify_frequency INT DEFAULT 0,
+        authenticate_qualify ENUM('yes','no') DEFAULT 'no'
+      )
+    `);
+    
+    // Create PJSIP contacts table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS ps_contacts (
+        id VARCHAR(40) NOT NULL PRIMARY KEY,
+        uri VARCHAR(511),
+        expiration_time BIGINT,
+        qualify_frequency INT DEFAULT 0,
+        outbound_proxy VARCHAR(40),
+        path TEXT,
+        user_agent VARCHAR(255),
+        qualify_timeout DECIMAL(3,1),
+        reg_server VARCHAR(20),
+        authenticate_qualify ENUM('yes','no') DEFAULT 'no',
+        via_addr VARCHAR(40),
+        via_port INT DEFAULT 0,
+        call_id VARCHAR(255),
+        endpoint VARCHAR(40),
+        prune_on_boot ENUM('yes','no') DEFAULT 'no'
+      )
+    `);
+    
     // Create extensions table for dynamic dialplan
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS extensions (
@@ -54,69 +128,6 @@ async function setupRealtimeTables() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
       )
-    `);
-    
-    // Add columns to sip_credentials table if they don't exist
-    const columnsToAdd = [
-      { name: 'name', definition: "VARCHAR(50) NOT NULL DEFAULT ''" },
-      { name: 'type', definition: "ENUM('friend', 'user', 'peer') DEFAULT 'friend'" },
-      { name: 'host', definition: "VARCHAR(50) DEFAULT 'dynamic'" },
-      { name: 'context', definition: "VARCHAR(50) DEFAULT 'from-internal'" },
-      { name: 'disallow', definition: "VARCHAR(100) DEFAULT 'all'" },
-      { name: 'allow', definition: "VARCHAR(100) DEFAULT 'ulaw,alaw,g722'" },
-      { name: 'secret', definition: "VARCHAR(100)" }
-    ];
-
-    for (const column of columnsToAdd) {
-      try {
-        await executeQuery(`
-          ALTER TABLE sip_credentials 
-          ADD COLUMN IF NOT EXISTS ${column.name} ${column.definition}
-        `);
-      } catch (error) {
-        if (error.code !== 'ER_DUP_FIELDNAME') {
-          throw error;
-        }
-        // Column already exists, continue
-      }
-    }
-
-    // Add indexes if they don't exist
-    const indexesToAdd = [
-      { name: 'idx_name', column: 'name' },
-      { name: 'idx_sip_username', column: 'sip_username' }
-    ];
-
-    for (const index of indexesToAdd) {
-      try {
-        // Check if index exists
-        const [rows] = await executeQuery(`
-          SELECT COUNT(*) as count 
-          FROM information_schema.statistics 
-          WHERE table_schema = DATABASE() 
-          AND table_name = 'sip_credentials' 
-          AND index_name = ?
-        `, [index.name]);
-
-        if (rows[0].count === 0) {
-          await executeQuery(`
-            ALTER TABLE sip_credentials 
-            ADD INDEX ${index.name} (${index.column})
-          `);
-        }
-      } catch (error) {
-        if (error.code !== 'ER_DUP_KEYNAME') {
-          throw error;
-        }
-        // Index already exists, continue
-      }
-    }
-    
-    // Set name field to sip_username for existing records
-    await executeQuery(`
-      UPDATE sip_credentials 
-      SET name = sip_username, secret = sip_password 
-      WHERE name = '' OR name IS NULL
     `);
     
     console.log('✓ Asterisk realtime tables created successfully');
