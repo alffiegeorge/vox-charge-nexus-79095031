@@ -652,6 +652,39 @@ connection=asterisk
 table=cdr
 EOF
 
+    # Asterisk realtime configuration
+    sudo tee /tmp/ibilling-config/extconfig.conf > /dev/null <<'EOF'
+
+[settings]
+; Map Asterisk objects to database tables for realtime
+
+; PJSIP Realtime Configuration (Asterisk 22)
+ps_endpoints => odbc,asterisk,ps_endpoints
+ps_auths => odbc,asterisk,ps_auths
+ps_aors => odbc,asterisk,ps_aors
+ps_contacts => odbc,asterisk,ps_contacts
+
+; Legacy SIP realtime (for compatibility)
+sipusers => odbc,asterisk,sip_credentials
+sippeers => odbc,asterisk,sip_credentials
+
+; Voicemail realtime
+voicemail => odbc,asterisk,voicemail_users
+
+; Extension realtime (optional - use with caution)
+extensions => odbc,asterisk,extensions
+
+; CDR realtime (handled by cdr_adaptive_odbc.conf)
+; cdr => odbc,asterisk,cdr
+
+; Queue realtime
+; queues => odbc,asterisk,queues
+; queue_members => odbc,asterisk,queue_members
+
+; Parking realtime
+; parkinglots => odbc,asterisk,parkinglots
+EOF
+
     # ODBC driver configuration
     sudo tee /tmp/ibilling-config/odbcinst.ini > /dev/null <<'EOF'
 [MariaDB]
