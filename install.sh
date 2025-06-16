@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling - Professional Voice Billing System Installation Script for Debian 12
@@ -11,8 +10,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
-
-# ... keep existing code (utility functions, check_and_setup_sudo, create_config_files, setup_database, setup_odbc functions) the same ...
 
 # Utility functions
 print_status() {
@@ -140,6 +137,64 @@ SCRIPT_EOF
         rm -f /tmp/fix_sudo.sh
         exit 1
     fi
+}
+
+clean_existing_asterisk() {
+    print_status "Cleaning existing Asterisk installations..."
+    
+    # Stop Asterisk service if running
+    if sudo systemctl is-active --quiet asterisk 2>/dev/null; then
+        print_status "Stopping Asterisk service..."
+        sudo systemctl stop asterisk
+    fi
+    
+    # Disable Asterisk service
+    if sudo systemctl is-enabled --quiet asterisk 2>/dev/null; then
+        print_status "Disabling Asterisk service..."
+        sudo systemctl disable asterisk
+    fi
+    
+    # Remove package-installed Asterisk
+    if dpkg -l | grep -q asterisk; then
+        print_status "Removing package-installed Asterisk..."
+        sudo apt-get remove --purge -y asterisk* || true
+        sudo apt-get autoremove -y || true
+    fi
+    
+    # Remove common Asterisk directories
+    print_status "Removing Asterisk directories and files..."
+    sudo rm -rf /etc/asterisk 2>/dev/null || true
+    sudo rm -rf /var/lib/asterisk 2>/dev/null || true
+    sudo rm -rf /var/log/asterisk 2>/dev/null || true
+    sudo rm -rf /var/spool/asterisk 2>/dev/null || true
+    sudo rm -rf /usr/lib/asterisk 2>/dev/null || true
+    sudo rm -rf /usr/share/asterisk 2>/dev/null || true
+    
+    # Remove Asterisk binaries
+    sudo rm -f /usr/sbin/asterisk 2>/dev/null || true
+    sudo rm -f /usr/bin/asterisk 2>/dev/null || true
+    
+    # Remove systemd service files
+    sudo rm -f /etc/systemd/system/asterisk.service 2>/dev/null || true
+    sudo rm -f /lib/systemd/system/asterisk.service 2>/dev/null || true
+    
+    # Clean old source installations
+    sudo rm -rf /usr/src/asterisk* 2>/dev/null || true
+    
+    # Remove asterisk user and group
+    if id asterisk >/dev/null 2>&1; then
+        print_status "Removing asterisk user..."
+        sudo userdel asterisk 2>/dev/null || true
+    fi
+    if getent group asterisk >/dev/null 2>&1; then
+        print_status "Removing asterisk group..."
+        sudo groupdel asterisk 2>/dev/null || true
+    fi
+    
+    # Reload systemd
+    sudo systemctl daemon-reload
+    
+    print_status "✓ Existing Asterisk installations cleaned"
 }
 
 create_config_files() {
@@ -577,8 +632,6 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('timezone', 'Pacific/Efate', 'string', 'general', 'System timezone');
 EOF
 
-    # ... keep existing code (other configuration files) the same ...
-    
     # Asterisk ODBC configuration
     sudo tee /tmp/ibilling-config/res_odbc.conf > /dev/null <<'EOF'
 [asterisk]
@@ -647,8 +700,6 @@ server {
 }
 EOF
 }
-
-# ... keep existing code (setup_database, setup_odbc functions) the same ...
 
 setup_database() {
     local mysql_root_password=$1
@@ -799,158 +850,136 @@ setup_odbc() {
     print_status "ODBC configuration completed"
 }
 
-install_asterisk() {
+install_asterisk_22() {
     local asterisk_db_password=$1
     
-    print_status "Installing Asterisk with ODBC support..."
+    print_status "Installing Asterisk 22 with ODBC support..."
     
-    print_status "Installing additional Asterisk build dependencies..."
+    print_status "Installing Asterisk 22 build dependencies..."
     sudo apt update
     sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
         libedit-dev libjansson-dev uuid-dev libsqlite3-dev libssl-dev \
         libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
-        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev
+        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev \
+        libneon27-dev libgmime-3.0-dev liburiparser-dev libical-dev \
+        libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
+        libradcli-dev python3-dev libpopt-dev libnewt-dev \
+        unixodbc unixodbc-dev libmariadb-dev odbc-mariadb
     
-    ASTERISK_DIR=""
-    if [ -d "/usr/src/asterisk-20"* ]; then
-        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
-        print_status "Found existing Asterisk source directory: $ASTERISK_DIR"
-    fi
+    cd /usr/src
     
-    if [ -z "$ASTERISK_DIR" ]; then
-        cd /usr/src
-        
-        if [ ! -f "asterisk-20-current.tar.gz" ]; then
-            print_status "Downloading Asterisk..."
-            sudo wget -O asterisk-20-current.tar.gz "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"
-        else
-            print_status "Asterisk source archive already exists"
-        fi
-        
-        if [ ! -d "asterisk-20"* ]; then
-            print_status "Extracting Asterisk..."
-            sudo tar xzf asterisk-20-current.tar.gz
-        else
-            print_status "Asterisk source already extracted"
-        fi
-        
-        ASTERISK_DIR=$(find /usr/src -maxdepth 1 -type d -name "asterisk-20*" | head -n 1)
-    fi
+    print_status "Downloading Asterisk 22..."
+    sudo wget -O asterisk-22-current.tar.gz "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
+    sudo tar xzf asterisk-22-current.tar.gz
     
-    cd "$ASTERISK_DIR"
-    print_status "Working in directory: $ASTERISK_DIR"
-
-    print_status "Checking MP3 source..."
-    if [ ! -f "addons/mp3/mpg123.h" ]; then
-        print_status "Getting MP3 source..."
-        sudo contrib/scripts/get_mp3_source.sh
-    else
-        print_status "MP3 source already present"
-    fi
-
-    if [ -f "config.log" ] && grep -q "error" config.log; then
-        print_status "Cleaning previous build attempt due to errors..."
-        sudo make clean || true
-        sudo rm -f config.log menuselect.makeopts || true
-    fi
-
-    if [ ! -f "config.log" ]; then
-        print_status "Configuring Asterisk build..."
-        sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp
-        if [ $? -ne 0 ]; then
-            print_error "Asterisk configure failed"
-            exit 1
-        fi
-    else
-        print_status "Asterisk build already configured"
-    fi
-
-    if [ ! -f "menuselect.makeopts" ]; then
-        print_status "Creating menuselect configuration..."
-        sudo make menuselect.makeopts
-        if [ $? -ne 0 ]; then
-            print_error "Failed to create menuselect configuration"
-            exit 1
-        fi
-    else
-        print_status "Menuselect configuration already exists"
-    fi
+    cd asterisk-22*/
     
-    print_status "Configuring required modules..."
-    sudo sed -i 's/^MENUSELECT_RES=.*res_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
-    sudo sed -i 's/^MENUSELECT_CDR=.*cdr_adaptive_odbc/MENUSELECT_CDR=/' menuselect.makeopts 2>/dev/null || true
-    sudo sed -i 's/^MENUSELECT_RES=.*res_config_odbc/MENUSELECT_RES=/' menuselect.makeopts 2>/dev/null || true
+    print_status "Getting MP3 source..."
+    sudo contrib/scripts/get_mp3_source.sh
     
-    if ! pkg-config --exists libcurl; then
-        print_warning "libcurl development headers not found, disabling res_config_curl"
-        sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl" | sudo tee -a menuselect.makeopts
-    fi
-
-    if [ ! -f "main/asterisk" ]; then
-        print_status "Building Asterisk (this may take 10-20 minutes)..."
-        sudo make -j$(nproc)
-        if [ $? -ne 0 ]; then
-            print_error "Asterisk build failed"
-            print_status "Trying to disable problematic modules and rebuild..."
-            
-            sudo sed -i '/^MENUSELECT_RES=/s/$/ res_config_curl res_curl/' menuselect.makeopts 2>/dev/null || echo "MENUSELECT_RES=res_config_curl res_curl" | sudo tee -a menuselect.makeopts
-            
-            sudo make clean
-            sudo make -j$(nproc)
-            if [ $? -ne 0 ]; then
-                print_error "Asterisk build failed even after disabling problematic modules"
-                exit 1
-            fi
-        fi
-    else
-        print_status "Asterisk already built, skipping compilation"
-    fi
-
-    print_status "Installing Asterisk..."
-    sudo make install
+    print_status "Configuring Asterisk 22 build with ODBC support..."
+    sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp --with-unixodbc
+    
     if [ $? -ne 0 ]; then
-        print_error "Asterisk installation failed"
+        print_error "Asterisk configure failed"
+        exit 1
+    fi
+    
+    print_status "Creating menuselect configuration..."
+    sudo make menuselect.makeopts
+    
+    print_status "Enabling ODBC and realtime modules..."
+    sudo menuselect/menuselect --enable res_odbc --enable cdr_adaptive_odbc --enable res_config_odbc menuselect.makeopts
+    sudo menuselect/menuselect --enable res_realtime menuselect.makeopts
+    sudo menuselect/menuselect --enable func_odbc menuselect.makeopts
+    
+    print_status "Building Asterisk 22 (this may take 15-30 minutes)..."
+    sudo make -j$(nproc)
+    if [ $? -ne 0 ]; then
+        print_error "Asterisk build failed"
         exit 1
     fi
 
-    if [ ! -f "/etc/asterisk/asterisk.conf" ]; then
-        print_status "Installing sample configurations..."
-        sudo make samples
-        sudo make config
-    else
-        print_status "Asterisk configuration files already exist"
-    fi
-    
+    print_status "Installing Asterisk 22..."
+    sudo make install
+    sudo make samples
+    sudo make config
     sudo ldconfig
 
+    configure_asterisk_22 "$asterisk_db_password"
+}
+
+configure_asterisk_22() {
+    local asterisk_db_password=$1
+    
+    print_status "Configuring Asterisk 22 for ODBC and realtime..."
+
+    # Create asterisk user if it doesn't exist
     if ! id asterisk >/dev/null 2>&1; then
         print_status "Creating asterisk user and group..."
         sudo groupadd -r asterisk
         sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
         sudo usermod -aG audio,dialout asterisk
-    else
-        print_status "Asterisk user already exists"
     fi
 
-    print_status "Setting proper ownership for Asterisk directories..."
+    # Set proper ownership
     sudo chown -R asterisk:asterisk /var/lib/asterisk
     sudo chown -R asterisk:asterisk /var/log/asterisk
     sudo chown -R asterisk:asterisk /var/spool/asterisk
     sudo chown -R asterisk:asterisk /etc/asterisk
 
-    print_status "Configuring Asterisk..."
-
+    # Backup original configs
     backup_file /etc/asterisk/res_odbc.conf
+    backup_file /etc/asterisk/extconfig.conf
+    backup_file /etc/asterisk/modules.conf
 
-    sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
-    sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
+    # Copy configuration templates
+    sudo cp "$(dirname "$0")/config/res_odbc.conf" /etc/asterisk/
+    sudo cp "$(dirname "$0")/config/cdr_adaptive_odbc.conf" /etc/asterisk/
+    sudo cp "$(dirname "$0")/config/extconfig.conf" /etc/asterisk/
+    sudo cp "$(dirname "$0")/config/extensions.conf" /etc/asterisk/
+    sudo cp "$(dirname "$0")/config/pjsip.conf" /etc/asterisk/
 
-    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/asterisk/res_odbc.conf
+    # Replace password placeholder in configuration files
+    sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
 
+    # Configure modules.conf to load ODBC and realtime modules
+    print_status "Configuring modules.conf for ODBC and realtime..."
+    
+    # Remove any existing ODBC module entries
+    sudo sed -i '/^load => res_odbc.so/d' /etc/asterisk/modules.conf
+    sudo sed -i '/^load => cdr_adaptive_odbc.so/d' /etc/asterisk/modules.conf
+    sudo sed -i '/^load => res_config_odbc.so/d' /etc/asterisk/modules.conf
+    sudo sed -i '/^load => res_realtime.so/d' /etc/asterisk/modules.conf
+    sudo sed -i '/^load => func_odbc.so/d' /etc/asterisk/modules.conf
+
+    # Add ODBC and realtime modules
+    cat << EOF | sudo tee -a /etc/asterisk/modules.conf
+
+; ODBC and Realtime modules for iBilling
+load => res_odbc.so
+load => cdr_adaptive_odbc.so
+load => res_config_odbc.so
+load => res_realtime.so
+load => func_odbc.so
+EOF
+
+    # Start and enable Asterisk
+    print_status "Starting Asterisk service..."
     sudo systemctl enable asterisk
     sudo systemctl start asterisk
 
-    print_status "Asterisk installation and configuration completed"
+    # Wait for Asterisk to start and verify ODBC modules are loaded
+    sleep 10
+    print_status "Verifying ODBC modules are loaded..."
+    
+    if sudo asterisk -rx "module show like odbc" | grep -q "res_odbc.so"; then
+        print_status "✓ ODBC modules loaded successfully"
+    else
+        print_warning "⚠ ODBC modules may not be loaded - check Asterisk logs"
+    fi
+
+    print_status "Asterisk 22 installation and ODBC/realtime configuration completed"
 }
 
 setup_web() {
@@ -1317,17 +1346,20 @@ main() {
 
     print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
 
-    # 1. Create directory structure
+    # 1. Clean existing Asterisk installations
+    clean_existing_asterisk
+
+    # 2. Create directory structure
     print_status "Creating directory structure..."
     create_directory "/opt/billing/web"
     create_directory "/opt/billing/logs"
     create_directory "/var/lib/asterisk/agi-bin" "asterisk:asterisk"
     create_directory "/etc/asterisk/backup"
 
-    # 2. Create configuration files
+    # 3. Create configuration files
     create_config_files
 
-    # 3. Update system and install dependencies
+    # 4. Update system and install dependencies
     print_status "Updating system and installing dependencies..."
     sudo apt update && sudo apt upgrade -y
     sudo apt install -y mariadb-server git curl unixodbc unixodbc-dev libmariadb-dev odbc-mariadb \
@@ -1339,50 +1371,50 @@ main() {
         python3-dev python3-pip nginx certbot python3-certbot-nginx libcurl4-openssl-dev \
         php-cli php-mysql
 
-    # 4. Generate passwords
+    # 5. Generate passwords
     MYSQL_ROOT_PASSWORD=$(generate_password)
     ASTERISK_DB_PASSWORD=$(generate_password)
 
-    # 5. Setup database with complete schema - THIS MUST BE DONE FIRST
+    # 6. Setup database with complete schema
     print_status "Setting up database with complete schema..."
     setup_database "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 6. Setup ODBC
+    # 7. Setup ODBC
     print_status "Setting up ODBC..."
     setup_odbc "${ASTERISK_DB_PASSWORD}"
 
-    # 7. Install and configure Asterisk
-    print_status "Installing Asterisk..."
-    install_asterisk "${ASTERISK_DB_PASSWORD}"
+    # 8. Install and configure Asterisk 22
+    print_status "Installing Asterisk 22..."
+    install_asterisk_22 "${ASTERISK_DB_PASSWORD}"
 
-    # 8. Setup web stack
+    # 9. Setup web stack
     print_status "Setting up web stack..."
     setup_web
 
-    # 9. Setup backend API
+    # 10. Setup backend API
     print_status "Setting up backend API..."
     setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 10. Setup Asterisk billing integration
+    # 11. Setup Asterisk billing integration
     print_status "Setting up Asterisk billing integration..."
     setup_asterisk_billing "${ASTERISK_DB_PASSWORD}"
 
-    # 11. Populate database with sample data (only after all tables are confirmed to exist)
+    # 12. Populate database with sample data
     print_status "Populating database..."
     populate_database "${MYSQL_ROOT_PASSWORD}"
 
-    # 12. Finalize installation with Nginx config update and service restart
+    # 13. Finalize installation with Nginx config update and service restart
     print_status "Finalizing installation..."
     finalize_installation
 
-    # 13. Perform final system checks and display summary
+    # 14. Perform final system checks and display summary
     perform_system_checks
     display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
 
-    # 14. Cleanup temporary files
+    # 15. Cleanup temporary files
     sudo rm -rf /tmp/ibilling-config
 
-    print_status "Installation completed successfully with full Asterisk billing integration!"
+    print_status "Installation completed successfully with Asterisk 22 and full ODBC/realtime integration!"
 }
 
 # Execute main function
