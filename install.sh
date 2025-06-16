@@ -933,12 +933,127 @@ configure_asterisk_22() {
     backup_file /etc/asterisk/extconfig.conf
     backup_file /etc/asterisk/modules.conf
 
-    # Copy configuration templates
-    sudo cp "$(dirname "$0")/config/res_odbc.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/config/cdr_adaptive_odbc.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/config/extconfig.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/config/extensions.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/config/pjsip.conf" /etc/asterisk/
+    # Copy configuration templates from /tmp/ibilling-config
+    sudo cp "/tmp/ibilling-config/res_odbc.conf" /etc/asterisk/
+    sudo cp "/tmp/ibilling-config/cdr_adaptive_odbc.conf" /etc/asterisk/
+    sudo cp "/tmp/ibilling-config/extconfig.conf" /etc/asterisk/
+
+    # Create extensions.conf and pjsip.conf from templates in create_config_files
+    print_status "Creating Asterisk configuration files..."
+    
+    # Create extensions.conf
+    sudo tee /etc/asterisk/extensions.conf > /dev/null <<'EOF'
+[general]
+static=yes
+writeprotect=no
+clearglobalvars=no
+
+[globals]
+; Global variables for billing system
+BILLING_API_URL=http://localhost:3001/api
+INTERNAL_CONTEXT=from-internal
+EXTERNAL_CONTEXT=from-external
+
+[from-internal]
+; Internal calls from authenticated SIP endpoints
+exten => _X.,1,NoOp(Internal call from ${CALLERID(num)} to ${EXTEN})
+exten => _X.,n,Set(CUSTOMER_ID=${ODBC_SQL(SELECT customer_id FROM sip_credentials WHERE sip_username='${CALLERID(num)}')})
+exten => _X.,n,GotoIf($["${CUSTOMER_ID}" = ""]?unauthorized,1)
+exten => _X.,n,Set(CUSTOMER_STATUS=${ODBC_SQL(SELECT status FROM customers WHERE id='${CUSTOMER_ID}')})
+exten => _X.,n,GotoIf($["${CUSTOMER_STATUS}" != "Active"]?suspended,1)
+exten => _X.,n,AGI(billing-check.php,${CUSTOMER_ID},${EXTEN})
+exten => _X.,n,GotoIf($["${BILLINGRESULT}" = "INSUFFICIENT_FUNDS"]?insufficient,1)
+exten => _X.,n,Set(RATE_INFO=${ODBC_SQL(SELECT rate,connection_fee,minimum_duration,billing_increment FROM rates WHERE '${EXTEN}' LIKE CONCAT(prefix,'%') ORDER BY LENGTH(prefix) DESC LIMIT 1)})
+exten => _X.,n,Set(CDR(accountcode)=${CUSTOMER_ID})
+exten => _X.,n,Set(CDR(userfield)=${RATE_INFO})
+exten => _X.,n,AGI(billing-start.php,${CUSTOMER_ID},${EXTEN},${RATE_INFO})
+exten => _X.,n,Dial(SIP/trunk/${EXTEN},30,gM(billing-monitor))
+exten => _X.,n,AGI(billing-end.php,${CUSTOMER_ID},${DIALSTATUS},${CDR(billsec)})
+exten => _X.,n,Hangup()
+
+; Handle unauthorized calls
+exten => unauthorized,1,NoOp(Unauthorized call attempt)
+exten => unauthorized,n,Playback(ss-noservice)
+exten => unauthorized,n,Hangup()
+
+; Handle suspended accounts
+exten => suspended,1,NoOp(Call from suspended account)
+exten => suspended,n,Playback(your-account-suspended)
+exten => suspended,n,Hangup()
+
+; Handle insufficient funds
+exten => insufficient,1,NoOp(Insufficient funds)
+exten => insufficient,n,Playback(insufficient-funds)
+exten => insufficient,n,Hangup()
+
+[from-external]
+; External calls coming into the system
+exten => _X.,1,NoOp(External call to ${EXTEN})
+exten => _X.,n,Set(DID_INFO=${ODBC_SQL(SELECT customer_id FROM dids WHERE number='${EXTEN}')})
+exten => _X.,n,GotoIf($["${DID_INFO}" = ""]?invalid,1)
+exten => _X.,n,Dial(SIP/${DID_INFO},30)
+exten => _X.,n,Hangup()
+
+exten => invalid,1,NoOp(Invalid DID)
+exten => invalid,n,Playback(ss-noservice)
+exten => invalid,n,Hangup()
+
+[macro-billing-monitor]
+; Macro to monitor call progress for real-time billing
+exten => s,1,NoOp(Starting billing monitor for call)
+exten => s,n,Set(MONITOR_EXEC=AGI(billing-monitor.php,${ARG1}))
+exten => s,n,MacroExit()
+EOF
+
+    # Create pjsip.conf
+    sudo tee /etc/asterisk/pjsip.conf > /dev/null <<'EOF'
+; PJSIP Configuration for iBilling
+; This file is managed by the iBilling system
+
+[global]
+type=global
+endpoint_identifier_order=username,ip
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:5060
+
+; Template for customer endpoints
+[customer-template](!)
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw,alaw,g722,g729
+direct_media=no
+ice_support=yes
+force_rport=yes
+rewrite_contact=yes
+rtp_symmetric=yes
+send_rpid=yes
+send_pai=yes
+trust_id_inbound=yes
+
+; Template for auth objects
+[auth-template](!)
+type=auth
+auth_type=userpass
+
+; Template for AOR objects  
+[aor-template](!)
+type=aor
+max_contacts=1
+remove_existing=yes
+qualify_frequency=60
+
+; Trunk configurations will be added here by the system
+; Customer configurations will be added here by the system
+EOF
 
     # Replace password placeholder in configuration files
     sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
