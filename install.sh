@@ -1,638 +1,79 @@
 #!/bin/bash
 
-# iBilling - Professional Voice Billing System Installation Script for Debian 12
-# Standalone version - no external dependencies required
-# Exit on error
-set -e
+# Asterisk installation script for iBilling
+source "$(dirname "$0")/utils.sh"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+install_asterisk() {
+    local asterisk_db_password=$1
+    
+    print_status "Installing Asterisk 22 with ODBC support..."
+    cd /usr/src
+    
+    # Download Asterisk 22
+    sudo wget -O asterisk-22-current.tar.gz "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
+    sudo tar xzf asterisk-22-current.tar.gz
+    cd asterisk-22*/
 
-# Utility functions
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+    # Install additional dependencies for Asterisk 22
+    print_status "Installing Asterisk 22 dependencies..."
+    sudo apt update
+    sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
+        libedit-dev libjansson-dev uuid-dev libsqlite3-dev libssl-dev \
+        libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
+        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev \
+        libneon27-dev libgmime-3.0-dev liburiparser-dev libical-dev \
+        libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
+        libradcli-dev python3-dev libpopt-dev libnewt-dev \
+        unixodbc unixodbc-dev libmariadb-dev odbc-mariadb
 
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+    # Configure Asterisk build with ODBC support
+    sudo contrib/scripts/get_mp3_source.sh
+    sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp --with-unixodbc
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-generate_password() {
-    openssl rand -base64 32
-}
-
-check_service() {
-    local service_name=$1
-    if sudo systemctl is-active --quiet "$service_name"; then
-        print_status "✓ $service_name is running"
-        return 0
-    else
-        print_error "✗ $service_name is not running"
-        return 1
+    # Verify ODBC is properly detected
+    print_status "Verifying ODBC configuration..."
+    if ! grep -q "ODBC" config.log; then
+        print_error "ODBC support not detected. Installing additional ODBC packages..."
+        sudo apt install -y libodbc1 odbcinst1debian2 unixodbc-dev
+        sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp --with-unixodbc
     fi
-}
 
-create_directory() {
-    local dir_path=$1
-    local owner=${2:-$USER:$USER}
-    
-    sudo mkdir -p "$dir_path"
-    if [ "$owner" != "root:root" ]; then
-        local user_name=$(echo "$owner" | cut -d: -f1)
-        if id "$user_name" >/dev/null 2>&1; then
-            sudo chown -R "$owner" "$dir_path"
-            print_status "Created directory: $dir_path (owner: $owner)"
-        else
-            print_status "Created directory: $dir_path (will set ownership later when $user_name user exists)"
-        fi
-    else
-        print_status "Created directory: $dir_path"
+    # Enable required modules in menuselect
+    sudo make menuselect.makeopts
+
+    # Enable ODBC and realtime modules
+    print_status "Enabling ODBC and realtime modules..."
+    sudo menuselect/menuselect --enable res_odbc --enable cdr_adaptive_odbc --enable res_config_odbc menuselect.makeopts
+    sudo menuselect/menuselect --enable res_realtime menuselect.makeopts
+    sudo menuselect/menuselect --enable func_odbc menuselect.makeopts
+
+    # Verify modules are enabled
+    if ! grep -q "res_odbc" menuselect.makeopts; then
+        print_warning "ODBC modules may not be available in this build"
     fi
-}
 
-backup_file() {
-    local file_path=$1
-    local backup_dir=${2:-/etc/asterisk/backup}
-    
-    if [ -f "$file_path" ]; then
-        sudo mkdir -p "$backup_dir"
-        sudo cp "$file_path" "$backup_dir/$(basename $file_path).orig" 2>/dev/null || true
-        print_status "Backed up: $file_path"
-    fi
-}
-
-check_and_setup_sudo() {
-    print_status "Checking sudo access..."
-    
-    if sudo -n true 2>/dev/null; then
-        print_status "✓ User has sudo access"
-        return 0
-    fi
-    
-    print_warning "Current user ($USER) does not have sudo access"
-    
-    if ! command -v sudo >/dev/null 2>&1; then
-        print_error "sudo is not installed on this system"
-        print_status "Installing sudo package..."
-        su - root -c "apt update && apt install -y sudo"
-    fi
-    
-    if groups "$USER" | grep -q '\bsudo\b'; then
-        print_warning "User is in sudo group but sudo access is not working"
-        print_status "This might be a sudo configuration issue"
-    else
-        print_status "User is not in sudo group"
-    fi
-    
-    echo -n "Please enter root password to configure sudo access for $USER: "
-    read -s ROOT_PASSWORD
-    echo ""
-    
-    print_status "Configuring sudo access..."
-    
-    cat > /tmp/fix_sudo.sh << 'SCRIPT_EOF'
-#!/bin/bash
-USER_TO_FIX="$1"
-
-groupadd -f sudo
-usermod -aG sudo "$USER_TO_FIX"
-
-if ! grep -q "^%sudo" /etc/sudoers; then
-    echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
-fi
-
-visudo -c
-
-if groups "$USER_TO_FIX" | grep -q '\bsudo\b'; then
-    echo "✓ User $USER_TO_FIX successfully added to sudo group"
-    exit 0
-else
-    echo "✗ Failed to add user $USER_TO_FIX to sudo group"
-    exit 1
-fi
-SCRIPT_EOF
-
-    chmod +x /tmp/fix_sudo.sh
-    
-    if echo "$ROOT_PASSWORD" | su - root -c "/tmp/fix_sudo.sh $USER"; then
-        print_status "✓ Sudo access configured successfully"
-        rm -f /tmp/fix_sudo.sh
-        print_warning "IMPORTANT: You must start a NEW terminal session for sudo to work"
-        print_status "Options to activate sudo access:"
-        echo "  1. Run: exec su - $USER"
-        echo "  2. Or close this terminal and open a new SSH session"
-        echo "  3. Or run: newgrp sudo && exec bash"
-        echo ""
-        print_status "After starting a new session, run this script again"
-        exit 0
-    else
-        print_error "Failed to configure sudo access"
-        rm -f /tmp/fix_sudo.sh
+    # Build and install
+    print_status "Building Asterisk 22 (this may take 15-30 minutes)..."
+    sudo make -j$(nproc)
+    if [ $? -ne 0 ]; then
+        print_error "Asterisk build failed"
         exit 1
     fi
-}
 
-clean_existing_asterisk() {
-    print_status "Cleaning existing Asterisk installations..."
-    
-    # Stop Asterisk service if running
-    if sudo systemctl is-active --quiet asterisk 2>/dev/null; then
-        print_status "Stopping Asterisk service..."
-        sudo systemctl stop asterisk
-    fi
-    
-    # Disable Asterisk service
-    if sudo systemctl is-enabled --quiet asterisk 2>/dev/null; then
-        print_status "Disabling Asterisk service..."
-        sudo systemctl disable asterisk
-    fi
-    
-    # Remove package-installed Asterisk
-    if dpkg -l | grep -q asterisk; then
-        print_status "Removing package-installed Asterisk..."
-        sudo apt-get remove --purge -y asterisk* || true
-        sudo apt-get autoremove -y || true
-    fi
-    
-    # Remove common Asterisk directories
-    print_status "Removing Asterisk directories and files..."
-    sudo rm -rf /etc/asterisk 2>/dev/null || true
-    sudo rm -rf /var/lib/asterisk 2>/dev/null || true
-    sudo rm -rf /var/log/asterisk 2>/dev/null || true
-    sudo rm -rf /var/spool/asterisk 2>/dev/null || true
-    sudo rm -rf /usr/lib/asterisk 2>/dev/null || true
-    sudo rm -rf /usr/share/asterisk 2>/dev/null || true
-    
-    # Remove Asterisk binaries
-    sudo rm -f /usr/sbin/asterisk 2>/dev/null || true
-    sudo rm -f /usr/bin/asterisk 2>/dev/null || true
-    
-    # Remove systemd service files
-    sudo rm -f /etc/systemd/system/asterisk.service 2>/dev/null || true
-    sudo rm -f /lib/systemd/system/asterisk.service 2>/dev/null || true
-    
-    # Clean old source installations
-    sudo rm -rf /usr/src/asterisk* 2>/dev/null || true
-    
-    # Remove asterisk user and group
-    if id asterisk >/dev/null 2>&1; then
-        print_status "Removing asterisk user..."
-        sudo userdel asterisk 2>/dev/null || true
-    fi
-    if getent group asterisk >/dev/null 2>&1; then
-        print_status "Removing asterisk group..."
-        sudo groupdel asterisk 2>/dev/null || true
-    fi
-    
-    # Reload systemd
-    sudo systemctl daemon-reload
-    
-    print_status "✓ Existing Asterisk installations cleaned"
+    sudo make install
+    sudo make samples
+    sudo make config
+    sudo ldconfig
+
+    # Configure Asterisk for ODBC and realtime
+    configure_asterisk "$asterisk_db_password"
 }
 
 create_config_files() {
     print_status "Creating configuration files..."
-    
     sudo mkdir -p /tmp/ibilling-config
     
-    # Complete database schema with ALL tables and proper column definitions including qr_code_enabled
-    sudo tee /tmp/ibilling-config/database-schema.sql > /dev/null <<'EOF'
--- iBilling Complete Database Schema with ALL required tables and columns
-CREATE TABLE IF NOT EXISTS cdr (
-    id INT(11) NOT NULL AUTO_INCREMENT,
-    calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
-    clid VARCHAR(80) NOT NULL DEFAULT '',
-    src VARCHAR(80) NOT NULL DEFAULT '',
-    dst VARCHAR(80) NOT NULL DEFAULT '',
-    dcontext VARCHAR(80) NOT NULL DEFAULT '',
-    channel VARCHAR(80) NOT NULL DEFAULT '',
-    dstchannel VARCHAR(80) NOT NULL DEFAULT '',
-    lastapp VARCHAR(80) NOT NULL DEFAULT '',
-    lastdata VARCHAR(80) NOT NULL DEFAULT '',
-    duration INT(11) NOT NULL DEFAULT '0',
-    billsec INT(11) NOT NULL DEFAULT '0',
-    disposition VARCHAR(45) NOT NULL DEFAULT '',
-    amaflags INT(11) NOT NULL DEFAULT '0',
-    accountcode VARCHAR(20) NOT NULL DEFAULT '',
-    uniqueid VARCHAR(32) NOT NULL DEFAULT '',
-    userfield VARCHAR(255) NOT NULL DEFAULT '',
-    peeraccount VARCHAR(20) NOT NULL DEFAULT '',
-    linkedid VARCHAR(32) NOT NULL DEFAULT '',
-    sequence INT(11) NOT NULL DEFAULT '0',
-    PRIMARY KEY (id),
-    INDEX calldate_idx (calldate),
-    INDEX src_idx (src),
-    INDEX dst_idx (dst),
-    INDEX accountcode_idx (accountcode)
-);
-
-CREATE TABLE IF NOT EXISTS customers (
-    id VARCHAR(20) NOT NULL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    phone VARCHAR(20) DEFAULT NULL,
-    company VARCHAR(100) DEFAULT NULL,
-    type ENUM('Prepaid', 'Postpaid') NOT NULL DEFAULT 'Prepaid',
-    balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    credit_limit DECIMAL(10,2) DEFAULT NULL,
-    status ENUM('Active', 'Suspended', 'Closed') NOT NULL DEFAULT 'Active',
-    address TEXT DEFAULT NULL,
-    notes TEXT DEFAULT NULL,
-    qr_code_enabled BOOLEAN DEFAULT FALSE,
-    qr_code_data TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- ... keep existing code (all other table definitions) the same ...
-
-CREATE TABLE IF NOT EXISTS rates (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    destination_prefix VARCHAR(20) NOT NULL,
-    destination_name VARCHAR(100) NOT NULL,
-    rate_per_minute DECIMAL(8,4) NOT NULL,
-    min_duration INT DEFAULT 0,
-    billing_increment INT DEFAULT 60,
-    effective_date DATE NOT NULL,
-    status ENUM('Active', 'Inactive') DEFAULT 'Active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX prefix_idx (destination_prefix),
-    INDEX date_idx (effective_date)
-);
-
-CREATE TABLE IF NOT EXISTS did_numbers (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    number VARCHAR(20) NOT NULL UNIQUE,
-    customer_id VARCHAR(20) DEFAULT NULL,
-    monthly_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
-    setup_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
-    status ENUM('Available', 'Assigned', 'Ported', 'Suspended') DEFAULT 'Available',
-    country VARCHAR(50) DEFAULT NULL,
-    region VARCHAR(50) DEFAULT NULL,
-    features JSON DEFAULT NULL,
-    assigned_date DATE DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-    INDEX customer_idx (customer_id),
-    INDEX status_idx (status)
-);
-
-CREATE TABLE IF NOT EXISTS system_settings (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    setting_key VARCHAR(100) NOT NULL UNIQUE,
-    setting_value TEXT DEFAULT NULL,
-    setting_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
-    category VARCHAR(50) DEFAULT 'general',
-    description TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX category_idx (category)
-);
-
-CREATE TABLE IF NOT EXISTS admin_users (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    salt VARCHAR(32) NOT NULL,
-    full_name VARCHAR(100) DEFAULT NULL,
-    role ENUM('Super Admin', 'Admin', 'Operator', 'Support') DEFAULT 'Operator',
-    status ENUM('Active', 'Suspended', 'Locked') DEFAULT 'Active',
-    last_login TIMESTAMP NULL,
-    login_attempts INT DEFAULT 0,
-    locked_until TIMESTAMP NULL,
-    two_factor_enabled BOOLEAN DEFAULT FALSE,
-    two_factor_secret VARCHAR(32) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS invoices (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    invoice_number VARCHAR(20) NOT NULL UNIQUE,
-    customer_id VARCHAR(20) NOT NULL,
-    invoice_date DATE NOT NULL,
-    due_date DATE NOT NULL,
-    subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    status ENUM('Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled') DEFAULT 'Draft',
-    payment_date DATE DEFAULT NULL,
-    notes TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    INDEX customer_idx (customer_id),
-    INDEX status_idx (status),
-    INDEX date_idx (invoice_date)
-);
-
-CREATE TABLE IF NOT EXISTS invoice_items (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    invoice_id INT(11) NOT NULL,
-    description VARCHAR(255) NOT NULL,
-    quantity DECIMAL(10,3) NOT NULL DEFAULT 1.000,
-    unit_price DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
-    total_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    item_type ENUM('Call', 'SMS', 'DID', 'Service', 'Other') DEFAULT 'Other',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
-    INDEX invoice_idx (invoice_id)
-);
-
-CREATE TABLE IF NOT EXISTS payments (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(20) NOT NULL,
-    invoice_id INT(11) DEFAULT NULL,
-    payment_method ENUM('Cash', 'Bank Transfer', 'Credit Card', 'Mobile Money', 'Crypto') NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
-    currency VARCHAR(3) DEFAULT 'VUV',
-    reference_number VARCHAR(100) DEFAULT NULL,
-    transaction_id VARCHAR(100) DEFAULT NULL,
-    status ENUM('Pending', 'Completed', 'Failed', 'Refunded') DEFAULT 'Pending',
-    payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
-    INDEX customer_idx (customer_id),
-    INDEX status_idx (status),
-    INDEX payment_date_idx (payment_date)
-);
-
-CREATE TABLE IF NOT EXISTS trunks (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE,
-    type ENUM('SIP', 'IAX2', 'DAHDI', 'PRI') DEFAULT 'SIP',
-    host VARCHAR(100) NOT NULL,
-    port INT DEFAULT 5060,
-    username VARCHAR(50) DEFAULT NULL,
-    password VARCHAR(100) DEFAULT NULL,
-    context VARCHAR(50) DEFAULT 'from-trunk',
-    codec_priority VARCHAR(100) DEFAULT 'ulaw,alaw,gsm',
-    max_channels INT DEFAULT 30,
-    status ENUM('Active', 'Inactive', 'Maintenance') DEFAULT 'Active',
-    cost_per_minute DECIMAL(8,4) DEFAULT 0.0000,
-    provider VARCHAR(100) DEFAULT NULL,
-    notes TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS routes (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    pattern VARCHAR(50) NOT NULL,
-    trunk_id INT(11) NOT NULL,
-    priority INT DEFAULT 1,
-    status ENUM('Active', 'Inactive') DEFAULT 'Active',
-    time_restrictions JSON DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (trunk_id) REFERENCES trunks(id) ON DELETE CASCADE,
-    INDEX pattern_idx (pattern),
-    INDEX priority_idx (priority)
-);
-
-CREATE TABLE IF NOT EXISTS sipusers (
-    id INT(11) NOT NULL AUTO_INCREMENT,
-    name VARCHAR(40) NOT NULL,
-    username VARCHAR(40) DEFAULT NULL,
-    secret VARCHAR(40) DEFAULT NULL,
-    md5secret VARCHAR(32) DEFAULT NULL,
-    context VARCHAR(40) DEFAULT NULL,
-    host VARCHAR(40) DEFAULT 'dynamic',
-    type ENUM('friend','user','peer') DEFAULT 'friend',
-    nat VARCHAR(40) DEFAULT 'yes',
-    port VARCHAR(40) DEFAULT NULL,
-    qualify VARCHAR(40) DEFAULT 'yes',
-    canreinvite VARCHAR(40) DEFAULT 'no',
-    rtptimeout VARCHAR(40) DEFAULT NULL,
-    rtpholdtimeout VARCHAR(40) DEFAULT NULL,
-    musiconhold VARCHAR(40) DEFAULT NULL,
-    cancallforward VARCHAR(40) DEFAULT 'yes',
-    dtmfmode VARCHAR(40) DEFAULT 'rfc2833',
-    insecure VARCHAR(40) DEFAULT NULL,
-    pickupgroup VARCHAR(40) DEFAULT NULL,
-    language VARCHAR(40) DEFAULT NULL,
-    disallow VARCHAR(40) DEFAULT 'all',
-    allow VARCHAR(40) DEFAULT 'ulaw,alaw,gsm',
-    accountcode VARCHAR(40) DEFAULT NULL,
-    amaflags VARCHAR(40) DEFAULT NULL,
-    callgroup VARCHAR(40) DEFAULT NULL,
-    callerid VARCHAR(40) DEFAULT NULL,
-    defaultuser VARCHAR(40) DEFAULT NULL,
-    fromuser VARCHAR(40) DEFAULT NULL,
-    fromdomain VARCHAR(40) DEFAULT NULL,
-    fullcontact VARCHAR(40) DEFAULT NULL,
-    regserver VARCHAR(40) DEFAULT NULL,
-    ipaddr VARCHAR(40) DEFAULT NULL,
-    regseconds INT(11) DEFAULT 0,
-    PRIMARY KEY (id),
-    UNIQUE KEY name (name)
-);
-
-CREATE TABLE IF NOT EXISTS voicemail (
-    id INT(11) NOT NULL AUTO_INCREMENT,
-    customer_id VARCHAR(40) NOT NULL,
-    context VARCHAR(40) NOT NULL DEFAULT 'default',
-    mailbox VARCHAR(40) NOT NULL DEFAULT '0',
-    password VARCHAR(40) NOT NULL DEFAULT '0',
-    fullname VARCHAR(40) NOT NULL DEFAULT '',
-    email VARCHAR(40) DEFAULT NULL,
-    pager VARCHAR(40) DEFAULT NULL,
-    tz VARCHAR(40) DEFAULT 'central',
-    attach VARCHAR(40) DEFAULT 'yes',
-    saycid VARCHAR(40) DEFAULT 'yes',
-    dialout VARCHAR(40) DEFAULT '',
-    callback VARCHAR(40) DEFAULT '',
-    review VARCHAR(40) DEFAULT 'no',
-    operator VARCHAR(40) DEFAULT 'yes',
-    envelope VARCHAR(40) DEFAULT 'no',
-    sayduration VARCHAR(40) DEFAULT 'no',
-    saydurationm VARCHAR(40) DEFAULT '1',
-    sendvoicemail VARCHAR(40) DEFAULT 'no',
-    delete_vm VARCHAR(40) DEFAULT 'no',
-    nextaftercmd VARCHAR(40) DEFAULT 'yes',
-    forcename VARCHAR(40) DEFAULT 'no',
-    forcegreetings VARCHAR(40) DEFAULT 'no',
-    hidefromdir VARCHAR(40) DEFAULT 'yes',
-    stamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS sms_messages (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(20) DEFAULT NULL,
-    from_number VARCHAR(20) NOT NULL,
-    to_number VARCHAR(20) NOT NULL,
-    message TEXT NOT NULL,
-    direction ENUM('Inbound', 'Outbound') NOT NULL,
-    status ENUM('Pending', 'Sent', 'Delivered', 'Failed') DEFAULT 'Pending',
-    cost DECIMAL(8,4) DEFAULT 0.0000,
-    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    delivered_at TIMESTAMP NULL,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-    INDEX customer_idx (customer_id),
-    INDEX direction_idx (direction),
-    INDEX sent_at_idx (sent_at)
-);
-
-CREATE TABLE IF NOT EXISTS sms_templates (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(100) NOT NULL,
-    message TEXT NOT NULL,
-    category VARCHAR(50) DEFAULT 'general',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS support_tickets (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    ticket_number VARCHAR(20) NOT NULL UNIQUE,
-    customer_id VARCHAR(20) DEFAULT NULL,
-    subject VARCHAR(200) NOT NULL,
-    description TEXT NOT NULL,
-    priority ENUM('Low', 'Medium', 'High', 'Critical') DEFAULT 'Medium',
-    status ENUM('Open', 'In Progress', 'Resolved', 'Closed') DEFAULT 'Open',
-    assigned_to INT(11) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    resolved_at TIMESTAMP NULL,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-    FOREIGN KEY (assigned_to) REFERENCES admin_users(id) ON DELETE SET NULL,
-    INDEX customer_idx (customer_id),
-    INDEX status_idx (status),
-    INDEX priority_idx (priority)
-);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    user_id INT(11) DEFAULT NULL,
-    user_type ENUM('admin', 'customer') DEFAULT 'admin',
-    action VARCHAR(100) NOT NULL,
-    table_name VARCHAR(50) DEFAULT NULL,
-    record_id VARCHAR(50) DEFAULT NULL,
-    old_values JSON DEFAULT NULL,
-    new_values JSON DEFAULT NULL,
-    ip_address VARCHAR(45) DEFAULT NULL,
-    user_agent TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX user_idx (user_id, user_type),
-    INDEX action_idx (action),
-    INDEX created_at_idx (created_at)
-);
-
-CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
-    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Add Asterisk realtime tables
-CREATE TABLE IF NOT EXISTS extensions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    context VARCHAR(40) NOT NULL DEFAULT '',
-    exten VARCHAR(40) NOT NULL DEFAULT '',
-    priority INT NOT NULL DEFAULT 0,
-    app VARCHAR(40) NOT NULL DEFAULT '',
-    appdata VARCHAR(256) NOT NULL DEFAULT '',
-    UNIQUE KEY context_exten_priority (context, exten, priority)
-);
-
-CREATE TABLE IF NOT EXISTS voicemail_users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(50) NOT NULL,
-    context VARCHAR(50) NOT NULL DEFAULT 'default',
-    mailbox VARCHAR(50) NOT NULL,
-    password VARCHAR(20) NOT NULL,
-    fullname VARCHAR(50) NOT NULL,
-    email VARCHAR(100),
-    pager VARCHAR(100),
-    options VARCHAR(100),
-    stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY mailbox_context (mailbox, context),
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS dids (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    number VARCHAR(20) NOT NULL UNIQUE,
-    customer_id VARCHAR(50) NOT NULL,
-    description VARCHAR(100),
-    monthly_cost DECIMAL(10,2) DEFAULT 0.00,
-    status ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS sip_credentials (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(50) NOT NULL,
-    sip_username VARCHAR(50) NOT NULL UNIQUE,
-    sip_password VARCHAR(100) NOT NULL,
-    name VARCHAR(50) NOT NULL DEFAULT '',
-    type ENUM('friend', 'user', 'peer') DEFAULT 'friend',
-    host VARCHAR(50) DEFAULT 'dynamic',
-    context VARCHAR(50) DEFAULT 'from-internal',
-    disallow VARCHAR(100) DEFAULT 'all',
-    allow VARCHAR(100) DEFAULT 'ulaw,alaw,g722',
-    secret VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    INDEX idx_name (name),
-    INDEX idx_sip_username (sip_username)
-);
-
-CREATE TABLE IF NOT EXISTS active_calls (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    call_id VARCHAR(100) NOT NULL UNIQUE,
-    customer_id VARCHAR(50) NOT NULL,
-    caller_id VARCHAR(50),
-    called_number VARCHAR(50) NOT NULL,
-    rate_id INT,
-    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    estimated_cost DECIMAL(10,4) DEFAULT 0.0000,
-    status ENUM('active', 'completed', 'failed') DEFAULT 'active',
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS billing_history (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(50) NOT NULL,
-    transaction_type ENUM('charge', 'credit', 'refund') NOT NULL,
-    amount DECIMAL(10,4) NOT NULL,
-    description TEXT,
-    call_id VARCHAR(100),
-    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
--- Insert basic sample data with proper column names (now that qr_code_enabled column exists)
-INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
-('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
-('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active', TRUE),
-('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended', FALSE);
-
-INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, category, description) VALUES
-('company_name', 'iBilling Communications', 'string', 'general', 'Company name displayed in the system'),
-('system_email', 'admin@ibilling.com', 'string', 'general', 'System email address for notifications'),
-('currency', 'VUV', 'string', 'general', 'Default currency for billing'),
-('timezone', 'Pacific/Efate', 'string', 'general', 'System timezone');
-EOF
-
-    # Asterisk ODBC configuration
+    # ODBC resource configuration
     sudo tee /tmp/ibilling-config/res_odbc.conf > /dev/null <<'EOF'
 [asterisk]
 enabled => yes
@@ -643,6 +84,8 @@ pooling => no
 limit => 1
 pre-connect => yes
 sanitysql => select 1
+connect_timeout => 10
+negative_connection_cache => 300
 EOF
 
     # CDR ODBC configuration
@@ -654,7 +97,6 @@ EOF
 
     # Asterisk realtime configuration
     sudo tee /tmp/ibilling-config/extconfig.conf > /dev/null <<'EOF'
-
 [settings]
 ; Map Asterisk objects to database tables for realtime
 
@@ -693,7 +135,7 @@ Driver      = /usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
 Threading   = 1
 EOF
 
-    # ODBC DSN template
+    # ODBC DSN configuration template
     sudo tee /tmp/ibilling-config/odbc.ini.template > /dev/null <<'EOF'
 [asterisk-connector]
 Description = MariaDB connection to 'asterisk' database
@@ -707,345 +149,49 @@ Socket      = /var/run/mysqld/mysqld.sock
 Option      = 3
 EOF
 
-    # Nginx configuration
-    sudo tee /tmp/ibilling-config/nginx-ibilling.conf > /dev/null <<'EOF'
-server {
-    listen 80;
-    server_name localhost;
-    root /opt/billing/web/dist;
-    index index.html;
+    # Basic extensions.conf for testing
+    sudo tee /tmp/ibilling-config/extensions.conf > /dev/null <<'EOF'
+; Extensions Configuration for iBilling
+; This file is managed by the iBilling system
 
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:3001/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-}
-
-setup_database() {
-    local mysql_root_password=$1
-    local asterisk_db_password=$2
-    
-    print_status "Configuring MariaDB..."
-    sudo systemctl start mariadb
-    sudo systemctl enable mariadb
-
-    print_status "Checking MariaDB configuration status..."
-    
-    if sudo mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
-        print_status "MariaDB is using socket authentication - setting up for first time..."
-        
-        sudo mysql <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-FLUSH PRIVILEGES;
-EOF
-        
-    elif mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-        print_status "MariaDB root password is already set and matches - continuing..."
-        
-    else
-        print_warning "MariaDB root password is set but doesn't match our generated password"
-        print_status "This might be from a previous installation attempt"
-        
-        sudo systemctl stop mariadb
-        sudo mysqld_safe --skip-grant-tables --skip-networking &
-        SAFE_PID=$!
-        sleep 5
-        
-        mysql -u root <<EOF
-FLUSH PRIVILEGES;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
-FLUSH PRIVILEGES;
-EOF
-        
-        sudo kill $SAFE_PID 2>/dev/null || true
-        sleep 2
-        sudo systemctl start mariadb
-        
-        if ! mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-            print_error "Failed to reset MariaDB root password"
-            print_status "Please manually reset MariaDB and run the script again"
-            exit 1
-        fi
-        
-        print_status "✓ MariaDB root password reset successfully"
-    fi
-
-    print_status "Dropping and recreating Asterisk database completely..."
-    
-    # Drop and recreate the database completely
-    mysql -u root -p"${mysql_root_password}" <<EOF
-DROP DATABASE IF EXISTS asterisk;
-DROP USER IF EXISTS 'asterisk'@'localhost';
-CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
-GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
-FLUSH PRIVILEGES;
-EOF
-
-    # Test the asterisk user connection
-    print_status "Testing asterisk user database connection..."
-    if mysql -u asterisk -p"${asterisk_db_password}" -e "USE asterisk; SELECT 1;" >/dev/null 2>&1; then
-        print_status "✓ Asterisk user database connection successful"
-    else
-        print_error "✗ Asterisk user database connection failed"
-        exit 1
-    fi
-
-    print_status "Creating ALL database tables from complete schema..."
-    mysql -u root -p"${mysql_root_password}" asterisk < /tmp/ibilling-config/database-schema.sql
-    
-    # Create default admin user with proper password hash
-    print_status "Creating default admin user..."
-    # Generate bcrypt hash for admin123
-    ADMIN_HASH='$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'
-    mysql -u root -p"${mysql_root_password}" asterisk <<EOF
-INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
-('admin', '${ADMIN_HASH}', 'admin@ibilling.local', 'admin', 'active');
-EOF
-    
-    # Verify all required tables exist with proper structure
-    print_status "Verifying database schema..."
-    mysql -u root -p"${mysql_root_password}" asterisk -e "SHOW TABLES;" > /tmp/table_list.txt
-    
-    REQUIRED_TABLES=(
-        "customers" "rates" "did_numbers" "admin_users" "trunks" "routes" 
-        "sipusers" "voicemail" "cdr" "invoices" "invoice_items" "payments" 
-        "sms_messages" "sms_templates" "support_tickets" "audit_logs" "system_settings"
-        "extensions" "voicemail_users" "dids" "sip_credentials" "active_calls" "billing_history"
-    )
-    
-    MISSING_TABLES=()
-    for table in "${REQUIRED_TABLES[@]}"; do
-        if ! grep -q "^${table}$" /tmp/table_list.txt; then
-            MISSING_TABLES+=("$table")
-        fi
-    done
-    
-    if [ ${#MISSING_TABLES[@]} -gt 0 ]; then
-        print_error "Missing tables: ${MISSING_TABLES[*]}"
-        print_status "Created tables:"
-        cat /tmp/table_list.txt
-        exit 1
-    else
-        print_status "✓ All required tables created successfully"
-    fi
-    
-    # Verify customers table has qr_code_enabled column
-    print_status "Verifying customers table structure..."
-    mysql -u root -p"${mysql_root_password}" asterisk -e "DESCRIBE customers;" > /tmp/customers_check.txt
-    
-    if grep -q "qr_code_enabled" /tmp/customers_check.txt; then
-        print_status "✓ Customers table has qr_code_enabled column"
-    else
-        print_error "✗ Customers table missing qr_code_enabled column"
-        print_status "Table structure:"
-        cat /tmp/customers_check.txt
-        exit 1
-    fi
-    
-    rm -f /tmp/table_list.txt /tmp/customers_check.txt
-    print_status "Database setup completed successfully"
-}
-
-setup_odbc() {
-    local asterisk_db_password=$1
-    
-    print_status "Configuring ODBC..."
-    
-    sudo cp /tmp/ibilling-config/odbcinst.ini /etc/odbcinst.ini
-    sudo cp /tmp/ibilling-config/odbc.ini.template /etc/odbc.ini
-    sudo sed -i "s|ASTERISK_DB_PASSWORD_PLACEHOLDER|${asterisk_db_password}|g" /etc/odbc.ini
-
-    print_status "Testing ODBC connection..."
-    if isql -v asterisk-connector asterisk "${asterisk_db_password}" <<< "SELECT 1;" >/dev/null 2>&1; then
-        print_status "✓ ODBC connection test successful"
-    else
-        print_warning "✗ ODBC connection test failed"
-    fi
-
-    print_status "ODBC configuration completed"
-}
-
-install_asterisk_22() {
-    local asterisk_db_password=$1
-    
-    print_status "Installing Asterisk 22 with ODBC support..."
-    
-    print_status "Installing Asterisk 22 build dependencies..."
-    sudo apt update
-    sudo apt install -y libcurl4-openssl-dev libxml2-dev libxslt1-dev \
-        libedit-dev libjansson-dev uuid-dev libsqlite3-dev libssl-dev \
-        libncurses5-dev libsrtp2-dev libspandsp-dev libtiff-dev \
-        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev \
-        libneon27-dev libgmime-3.0-dev liburiparser-dev libical-dev \
-        libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
-        libradcli-dev python3-dev libpopt-dev libnewt-dev \
-        unixodbc unixodbc-dev libmariadb-dev odbc-mariadb
-    
-    cd /usr/src
-    
-    print_status "Downloading Asterisk 22..."
-    sudo wget -O asterisk-22-current.tar.gz "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
-    sudo tar xzf asterisk-22-current.tar.gz
-    
-    cd asterisk-22*/
-    
-    print_status "Getting MP3 source..."
-    sudo contrib/scripts/get_mp3_source.sh
-    
-    print_status "Configuring Asterisk 22 build with ODBC support..."
-    sudo ./configure --with-odbc --with-crypto --with-ssl --with-srtp --with-unixodbc
-    
-    if [ $? -ne 0 ]; then
-        print_error "Asterisk configure failed"
-        exit 1
-    fi
-    
-    print_status "Creating menuselect configuration..."
-    sudo make menuselect.makeopts
-    
-    print_status "Enabling ODBC and realtime modules..."
-    sudo menuselect/menuselect --enable res_odbc --enable cdr_adaptive_odbc --enable res_config_odbc menuselect.makeopts
-    sudo menuselect/menuselect --enable res_realtime menuselect.makeopts
-    sudo menuselect/menuselect --enable func_odbc menuselect.makeopts
-    
-    print_status "Building Asterisk 22 (this may take 15-30 minutes)..."
-    sudo make -j$(nproc)
-    if [ $? -ne 0 ]; then
-        print_error "Asterisk build failed"
-        exit 1
-    fi
-
-    print_status "Installing Asterisk 22..."
-    sudo make install
-    sudo make samples
-    sudo make config
-    sudo ldconfig
-
-    configure_asterisk_22 "$asterisk_db_password"
-}
-
-configure_asterisk_22() {
-    local asterisk_db_password=$1
-    
-    print_status "Configuring Asterisk 22 for ODBC and realtime..."
-
-    # Create asterisk user if it doesn't exist
-    if ! id asterisk >/dev/null 2>&1; then
-        print_status "Creating asterisk user and group..."
-        sudo groupadd -r asterisk
-        sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
-        sudo usermod -aG audio,dialout asterisk
-    fi
-
-    # Set proper ownership
-    sudo chown -R asterisk:asterisk /var/lib/asterisk
-    sudo chown -R asterisk:asterisk /var/log/asterisk
-    sudo chown -R asterisk:asterisk /var/spool/asterisk
-    sudo chown -R asterisk:asterisk /etc/asterisk
-
-    # Backup original configs
-    backup_file /etc/asterisk/res_odbc.conf
-    backup_file /etc/asterisk/extconfig.conf
-    backup_file /etc/asterisk/modules.conf
-
-    # Copy configuration templates from /tmp/ibilling-config
-    sudo cp "/tmp/ibilling-config/res_odbc.conf" /etc/asterisk/
-    sudo cp "/tmp/ibilling-config/cdr_adaptive_odbc.conf" /etc/asterisk/
-    sudo cp "/tmp/ibilling-config/extconfig.conf" /etc/asterisk/
-
-    # Create extensions.conf and pjsip.conf from templates in create_config_files
-    print_status "Creating Asterisk configuration files..."
-    
-    # Create extensions.conf
-    sudo tee /etc/asterisk/extensions.conf > /dev/null <<'EOF'
 [general]
 static=yes
 writeprotect=no
 clearglobalvars=no
 
 [globals]
-; Global variables for billing system
-BILLING_API_URL=http://localhost:3001/api
-INTERNAL_CONTEXT=from-internal
-EXTERNAL_CONTEXT=from-external
+; Global variables go here
 
 [from-internal]
-; Internal calls from authenticated SIP endpoints
-exten => _X.,1,NoOp(Internal call from ${CALLERID(num)} to ${EXTEN})
-exten => _X.,n,Set(CUSTOMER_ID=${ODBC_SQL(SELECT customer_id FROM sip_credentials WHERE sip_username='${CALLERID(num)}')})
-exten => _X.,n,GotoIf($["${CUSTOMER_ID}" = ""]?unauthorized,1)
-exten => _X.,n,Set(CUSTOMER_STATUS=${ODBC_SQL(SELECT status FROM customers WHERE id='${CUSTOMER_ID}')})
-exten => _X.,n,GotoIf($["${CUSTOMER_STATUS}" != "Active"]?suspended,1)
-exten => _X.,n,AGI(billing-check.php,${CUSTOMER_ID},${EXTEN})
-exten => _X.,n,GotoIf($["${BILLINGRESULT}" = "INSUFFICIENT_FUNDS"]?insufficient,1)
-exten => _X.,n,Set(RATE_INFO=${ODBC_SQL(SELECT rate,connection_fee,minimum_duration,billing_increment FROM rates WHERE '${EXTEN}' LIKE CONCAT(prefix,'%') ORDER BY LENGTH(prefix) DESC LIMIT 1)})
-exten => _X.,n,Set(CDR(accountcode)=${CUSTOMER_ID})
-exten => _X.,n,Set(CDR(userfield)=${RATE_INFO})
-exten => _X.,n,AGI(billing-start.php,${CUSTOMER_ID},${EXTEN},${RATE_INFO})
-exten => _X.,n,Dial(SIP/trunk/${EXTEN},30,gM(billing-monitor))
-exten => _X.,n,AGI(billing-end.php,${CUSTOMER_ID},${DIALSTATUS},${CDR(billsec)})
-exten => _X.,n,Hangup()
+; Internal extension context
+; Test extension for PJSIP endpoints
+exten => 100,1,Dial(PJSIP/100)
+exten => 101,1,Dial(PJSIP/101)
 
-; Handle unauthorized calls
-exten => unauthorized,1,NoOp(Unauthorized call attempt)
-exten => unauthorized,n,Playback(ss-noservice)
-exten => unauthorized,n,Hangup()
+; Echo test
+exten => 600,1,Answer()
+exten => 600,n,Echo()
+exten => 600,n,Hangup()
 
-; Handle suspended accounts
-exten => suspended,1,NoOp(Call from suspended account)
-exten => suspended,n,Playback(your-account-suspended)
-exten => suspended,n,Hangup()
-
-; Handle insufficient funds
-exten => insufficient,1,NoOp(Insufficient funds)
-exten => insufficient,n,Playback(insufficient-funds)
-exten => insufficient,n,Hangup()
+; Voicemail test
+exten => *97,1,VoiceMailMain()
 
 [from-external]
-; External calls coming into the system
-exten => _X.,1,NoOp(External call to ${EXTEN})
-exten => _X.,n,Set(DID_INFO=${ODBC_SQL(SELECT customer_id FROM dids WHERE number='${EXTEN}')})
-exten => _X.,n,GotoIf($["${DID_INFO}" = ""]?invalid,1)
-exten => _X.,n,Dial(SIP/${DID_INFO},30)
-exten => _X.,n,Hangup()
+; External/trunk context
+; DID routing will be added here by the system
 
-exten => invalid,1,NoOp(Invalid DID)
-exten => invalid,n,Playback(ss-noservice)
-exten => invalid,n,Hangup()
-
-[macro-billing-monitor]
-; Macro to monitor call progress for real-time billing
-exten => s,1,NoOp(Starting billing monitor for call)
-exten => s,n,Set(MONITOR_EXEC=AGI(billing-monitor.php,${ARG1}))
-exten => s,n,MacroExit()
+include => from-internal
 EOF
 
-    # Create pjsip.conf
-    sudo tee /etc/asterisk/pjsip.conf > /dev/null <<'EOF'
+    # Enhanced PJSIP configuration with debugging
+    sudo tee /tmp/ibilling-config/pjsip.conf > /dev/null <<'EOF'
 ; PJSIP Configuration for iBilling
 ; This file is managed by the iBilling system
 
 [global]
 type=global
 endpoint_identifier_order=username,ip
+debug=yes
 
 [transport-udp]
 type=transport
@@ -1084,9 +230,114 @@ max_contacts=1
 remove_existing=yes
 qualify_frequency=60
 
+; Sample endpoint for testing (will be replaced by realtime)
+[100]
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw,alaw
+aors=100
+auth=100
+
+[100]
+type=auth
+auth_type=userpass
+username=100
+password=test123
+
+[100]
+type=aor
+max_contacts=1
+
 ; Trunk configurations will be added here by the system
 ; Customer configurations will be added here by the system
 EOF
+
+    print_status "Configuration files created in /tmp/ibilling-config/"
+}
+
+setup_system() {
+    print_status "Setting up system..."
+    
+    # Update package lists
+    sudo apt update
+
+    # Install necessary packages
+    sudo apt install -y wget mariadb-client net-tools vim git
+
+    # Set timezone
+    sudo timedatectl set-timezone UTC
+    
+    print_status "System setup completed"
+}
+
+setup_database() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
+    
+    print_status "Configuring MariaDB..."
+    sudo systemctl start mariadb
+    sudo systemctl enable mariadb
+
+    # Secure MariaDB installation
+    print_status "Securing MariaDB installation..."
+    sudo mysql -u root <<EOF
+UPDATE mysql.user SET Password=PASSWORD('${mysql_root_password}') WHERE User='root';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;
+EOF
+
+    # Create Asterisk database and user
+    print_status "Creating Asterisk database and user..."
+    sudo mysql -u root -p"${mysql_root_password}" <<EOF
+CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+    # Create database tables
+    print_status "Creating database tables..."
+    sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/../config/database-schema.sql"
+    
+    print_status "Database setup completed successfully"
+}
+
+configure_asterisk() {
+    local asterisk_db_password=$1
+    
+    print_status "Configuring Asterisk 22 for ODBC and realtime..."
+
+    # Create asterisk user if it doesn't exist
+    if ! id asterisk >/dev/null 2>&1; then
+        print_status "Creating asterisk user and group..."
+        sudo groupadd -r asterisk
+        sudo useradd -r -d /var/lib/asterisk -g asterisk asterisk
+        sudo usermod -aG audio,dialout asterisk
+    fi
+
+    # Set proper ownership
+    sudo chown -R asterisk:asterisk /var/lib/asterisk
+    sudo chown -R asterisk:asterisk /var/log/asterisk
+    sudo chown -R asterisk:asterisk /var/spool/asterisk
+    sudo chown -R asterisk:asterisk /etc/asterisk
+
+    # Backup original configs
+    backup_file /etc/asterisk/res_odbc.conf
+    backup_file /etc/asterisk/extconfig.conf
+    backup_file /etc/asterisk/modules.conf
+    backup_file /etc/asterisk/pjsip.conf
+    backup_file /etc/asterisk/extensions.conf
+
+    # Copy configuration templates
+    sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
+    sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
+    sudo cp /tmp/ibilling-config/extconfig.conf /etc/asterisk/
+    sudo cp /tmp/ibilling-config/extensions.conf /etc/asterisk/
+    sudo cp /tmp/ibilling-config/pjsip.conf /etc/asterisk/
 
     # Replace password placeholder in configuration files
     sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
@@ -1094,476 +345,146 @@ EOF
     # Configure modules.conf to load ODBC and realtime modules
     print_status "Configuring modules.conf for ODBC and realtime..."
     
-    # Remove any existing ODBC module entries
-    sudo sed -i '/^load => res_odbc.so/d' /etc/asterisk/modules.conf
-    sudo sed -i '/^load => cdr_adaptive_odbc.so/d' /etc/asterisk/modules.conf
-    sudo sed -i '/^load => res_config_odbc.so/d' /etc/asterisk/modules.conf
-    sudo sed -i '/^load => res_realtime.so/d' /etc/asterisk/modules.conf
-    sudo sed -i '/^load => func_odbc.so/d' /etc/asterisk/modules.conf
+    # Create a clean modules.conf with required modules
+    sudo tee /etc/asterisk/modules.conf > /dev/null <<'EOF'
+[modules]
+autoload=yes
 
-    # Add ODBC and realtime modules
-    cat << EOF | sudo tee -a /etc/asterisk/modules.conf
-
-; ODBC and Realtime modules for iBilling
+; Explicitly load ODBC and realtime modules
 load => res_odbc.so
 load => cdr_adaptive_odbc.so
 load => res_config_odbc.so
 load => res_realtime.so
 load => func_odbc.so
+
+; Load PJSIP modules
+load => res_pjsip.so
+load => res_pjsip_session.so
+load => res_pjsip_registrar.so
+load => res_pjsip_authenticator_digest.so
+load => res_pjsip_endpoint_identifier_user.so
+load => res_pjsip_endpoint_identifier_ip.so
+load => res_pjsip_transport_udp.so
+load => res_pjsip_transport_tcp.so
+
+; Core modules
+load => chan_pjsip.so
+load => app_dial.so
+load => app_echo.so
+load => app_voicemail.so
+load => pbx_config.so
+
+; Disable chan_sip to avoid conflicts
+noload => chan_sip.so
 EOF
+
+    # Set proper permissions
+    sudo chown asterisk:asterisk /etc/asterisk/*
+
+    # Test ODBC connectivity before starting Asterisk
+    print_status "Testing ODBC connectivity..."
+    if command -v isql >/dev/null 2>&1; then
+        if echo "SELECT 1;" | isql -v asterisk-connector asterisk "${asterisk_db_password}" >/dev/null 2>&1; then
+            print_status "✓ ODBC connection test successful"
+        else
+            print_warning "⚠ ODBC connection test failed - check configuration"
+        fi
+    else
+        print_warning "⚠ isql command not available for ODBC testing"
+    fi
+
+    # Stop any existing Asterisk
+    sudo systemctl stop asterisk 2>/dev/null || true
+    sudo pkill -f asterisk 2>/dev/null || true
+    sleep 3
 
     # Start and enable Asterisk
     print_status "Starting Asterisk service..."
     sudo systemctl enable asterisk
     sudo systemctl start asterisk
 
-    # Wait for Asterisk to start and verify ODBC modules are loaded
-    sleep 10
-    print_status "Verifying ODBC modules are loaded..."
+    # Wait for Asterisk to start and verify modules are loaded
+    sleep 15
+    print_status "Verifying Asterisk modules and configuration..."
     
-    if sudo asterisk -rx "module show like odbc" | grep -q "res_odbc.so"; then
-        print_status "✓ ODBC modules loaded successfully"
+    # Check if Asterisk is running
+    if sudo systemctl is-active --quiet asterisk; then
+        print_status "✓ Asterisk service is running"
+        
+        # Check ODBC modules
+        if sudo asterisk -rx "module show like odbc" 2>/dev/null | grep -q "res_odbc.so"; then
+            print_status "✓ ODBC modules loaded successfully"
+        else
+            print_warning "⚠ ODBC modules may not be loaded - check Asterisk logs"
+        fi
+        
+        # Check PJSIP modules
+        if sudo asterisk -rx "module show like pjsip" 2>/dev/null | grep -q "res_pjsip.so"; then
+            print_status "✓ PJSIP modules loaded successfully"
+        else
+            print_warning "⚠ PJSIP modules may not be loaded"
+        fi
+        
+        # Test ODBC connection from Asterisk
+        print_status "Testing ODBC connection from Asterisk..."
+        if sudo asterisk -rx "odbc show all" 2>/dev/null | grep -q "asterisk.*Connected"; then
+            print_status "✓ ODBC connection active in Asterisk"
+        else
+            print_warning "⚠ ODBC connection not active in Asterisk"
+        fi
+        
+        # Check realtime configuration
+        if sudo asterisk -rx "realtime load ps_endpoints id" 2>/dev/null >/dev/null; then
+            print_status "✓ Realtime configuration is working"
+        else
+            print_warning "⚠ Realtime configuration may need adjustment"
+        fi
+        
     else
-        print_warning "⚠ ODBC modules may not be loaded - check Asterisk logs"
+        print_error "✗ Asterisk service failed to start"
+        print_status "Check logs with: sudo journalctl -u asterisk -f"
     fi
 
     print_status "Asterisk 22 installation and ODBC/realtime configuration completed"
+    print_status ""
+    print_status "Verification commands:"
+    print_status "- Check Asterisk status: sudo systemctl status asterisk"
+    print_status "- Check ODBC: sudo asterisk -rx 'odbc show all'"
+    print_status "- Check PJSIP endpoints: sudo asterisk -rx 'pjsip show endpoints'"
+    print_status "- Check realtime: sudo asterisk -rx 'realtime load ps_endpoints id'"
+    print_status "- View logs: sudo journalctl -u asterisk -f"
+    print_status ""
+    print_status "Note: No endpoints will show until they are created in the database"
+    print_status "Use the iBilling web interface to create customer endpoints"
 }
 
-setup_web() {
-    print_status "Installing Node.js and npm..."
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt install -y nodejs
-
-    print_status "Setting up iBilling frontend..."
-    cd /opt/billing/web
-
-    sudo rm -rf ./*
-
-    sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031 .
-
-    sudo chown -R $USER:$USER /opt/billing/web
-
-    # Make all scripts executable
-    print_status "Making installation scripts executable..."
-    chmod +x scripts/*.sh
-    chmod +x install.sh
-
-    npm install
-    npm run build
-
-    print_status "Configuring Nginx..."
-    
-    sudo cp /tmp/ibilling-config/nginx-ibilling.conf /etc/nginx/sites-available/ibilling
-
-    sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
-    sudo rm -f /etc/nginx/sites-enabled/default
-
-    sudo nginx -t
-    sudo systemctl enable nginx
-    sudo systemctl restart nginx
-
-    print_status "Web stack setup completed successfully"
-}
-
-setup_backend() {
-    local mysql_root_password=$1
-    local asterisk_db_password=$2
-    
-    print_status "Setting up backend API server..."
-    
-    cd /opt/billing/web/backend
-    
-    sudo chown -R $USER:$USER /opt/billing/web/backend
-    
-    print_status "Installing backend dependencies..."
-    npm install
-    
-    print_status "Creating backend environment file..."
-    tee /opt/billing/web/backend/.env > /dev/null <<EOF
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=asterisk
-DB_USER=asterisk
-DB_PASSWORD=${asterisk_db_password}
-
-# JWT Configuration
-JWT_SECRET=$(openssl rand -base64 32)
-
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-
-# Asterisk Configuration
-ASTERISK_HOST=localhost
-ASTERISK_PORT=5038
-ASTERISK_USERNAME=admin
-ASTERISK_SECRET=
-EOF
-    
-    print_status "Setting up Asterisk realtime tables..."
-    node -e "
-    require('dotenv').config();
-    const { setupRealtimeTables } = require('./realtime-setup');
-    setupRealtimeTables().then(() => {
-        console.log('Realtime tables setup completed');
-        process.exit(0);
-    }).catch(err => {
-        console.error('Error setting up realtime tables:', err);
-        process.exit(1);
-    });
-    "
-    
-    print_status "Creating backend service..."
-    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
-[Unit]
-Description=iBilling Backend API Server
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=/opt/billing/web/backend
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/web/backend/.env
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable ibilling-backend
-    sudo systemctl start ibilling-backend
-    
-    # Wait for service to start and test connection
-    sleep 5
-    
-    print_status "Testing backend service..."
-    if curl -s http://localhost:3001/health > /dev/null; then
-        print_status "✓ Backend API is responding"
-    else
-        print_warning "⚠ Backend service may need more time to start"
-        print_status "Checking service status..."
-        sudo systemctl status ibilling-backend --no-pager -l
-    fi
-    
-    print_status "Backend API setup completed"
-}
-
-setup_asterisk_billing() {
-    local asterisk_db_password=$1
-    
-    print_status "Setting up Asterisk billing integration..."
-    
-    cd /opt/billing/web
-    
-    # Run the AGI setup script
-    if [ -f "scripts/setup-agi.sh" ]; then
-        print_status "Running AGI setup script..."
-        echo "${asterisk_db_password}" | ./scripts/setup-agi.sh
-    else
-        print_warning "AGI setup script not found, manual setup required"
-    fi
-    
-    print_status "Asterisk billing integration completed"
-}
-
-populate_database() {
-    local mysql_root_password=$1
-    
-    print_status "Populating database with sample data..."
-    
-    cd /opt/billing/web
-    
-    print_status "Verifying all tables exist before population..."
-    mysql -u root -p"${mysql_root_password}" asterisk -e "SHOW TABLES;" > /tmp/final_table_check.txt
-    
-    REQUIRED_TABLES=(
-        "customers" "rates" "did_numbers" "admin_users" "trunks" "routes" 
-        "sipusers" "voicemail" "cdr" "invoices" "invoice_items" "payments" 
-        "sms_messages" "sms_templates" "support_tickets" "audit_logs" "system_settings"
-        "extensions" "voicemail_users" "dids" "sip_credentials" "active_calls" "billing_history"
-    )
-    
-    MISSING_TABLES=()
-    for table in "${REQUIRED_TABLES[@]}"; do
-        if ! grep -q "^${table}$" /tmp/final_table_check.txt; then
-            MISSING_TABLES+=("$table")
-        fi
-    done
-    
-    if [ ${#MISSING_TABLES[@]} -gt 0 ]; then
-        print_error "Cannot populate database - missing tables: ${MISSING_TABLES[*]}"
-        print_status "Running database schema fix script..."
-        if [ -f "scripts/fix-database-schema.sh" ]; then
-            echo "${mysql_root_password}" | ./scripts/fix-database-schema.sh
-        else
-            print_error "Database fix script not found!"
-            exit 1
-        fi
-    else
-        print_status "✓ All required tables exist, proceeding with population"
-    fi
-    
-    rm -f /tmp/final_table_check.txt
-    
-    # Run database schema update script
-    if [ -f "scripts/update-database-schema.sh" ]; then
-        print_status "Updating database schema..."
-        echo "${mysql_root_password}" | ./scripts/update-database-schema.sh
-    fi
-    
-    # Run sample data population script
-    if [ -f "scripts/populate-sample-data.sh" ]; then
-        print_status "Populating sample data..."
-        echo "${mysql_root_password}" | ./scripts/populate-sample-data.sh
-    fi
-    
-    # Verify database population
-    if [ -f "scripts/verify-database-population.sh" ]; then
-        print_status "Verifying database population..."
-        echo "${mysql_root_password}" | ./scripts/verify-database-population.sh
-    fi
-    
-    print_status "Database population completed successfully"
-}
-
-perform_system_checks() {
-    print_status "Performing final system checks..."
-
-    local all_good=true
-
-    if ! check_service mariadb; then
-        all_good=false
+# Execute if run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [ $# -eq 0 ]; then
+        echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
+        exit 1
     fi
 
-    if ! check_service asterisk; then
-        all_good=false
+    if [ $# -eq 1 ]; then
+        echo "Usage: $0 <asterisk_db_password>"
+        exit 1
     fi
 
-    if ! check_service nginx; then
-        all_good=false
+    if [ $# -eq 2 ]; then
+        MYSQL_ROOT_PASSWORD=$1
+        ASTERISK_DB_PASSWORD=$2
     fi
 
-    if ! check_service ibilling-backend; then
-        all_good=false
-    fi
-
-    if [ "$all_good" = true ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-finalize_installation() {
-    print_status "Finalizing installation..."
-    
-    # Copy updated Nginx configuration from git repository
-    print_status "Updating Nginx configuration with latest version..."
-    sudo cp config/nginx-ibilling.conf /etc/nginx/sites-available/ibilling
-    
-    # Test and reload Nginx
-    print_status "Testing Nginx configuration..."
-    sudo nginx -t
-    if [ $? -eq 0 ]; then
-        print_status "✓ Nginx configuration test passed"
-        print_status "Reloading Nginx..."
-        sudo systemctl reload nginx
-        print_status "✓ Nginx reloaded successfully"
-    else
-        print_error "✗ Nginx configuration test failed"
-        return 1
+    if [ $# -eq 1 ]; then
+        ASTERISK_DB_PASSWORD=$1
     fi
     
-    # Restart backend service
-    print_status "Restarting backend service..."
-    sudo systemctl restart ibilling-backend
+    setup_system
     
-    # Wait for backend to start and verify
-    sleep 5
-    if sudo systemctl is-active --quiet ibilling-backend; then
-        print_status "✓ Backend service restarted successfully"
-        
-        # Test API endpoint
-        sleep 2
-        if curl -s http://localhost:3001/health > /dev/null; then
-            print_status "✓ Backend API is responding"
-        else
-            print_warning "⚠ Backend service is running but API not responding yet"
-        fi
-    else
-        print_error "✗ Backend service failed to restart"
-        print_status "Checking service logs..."
-        sudo journalctl -u ibilling-backend --no-pager -n 20
-        return 1
+    if [ -n "$MYSQL_ROOT_PASSWORD" ] && [ -n "$ASTERISK_DB_PASSWORD" ]; then
+        setup_database "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
     fi
     
-    print_status "Installation finalization completed successfully"
-}
-
-display_installation_summary() {
-    local mysql_root_password=$1
-    local asterisk_db_password=$2
-    
-    print_status "============================================="
-    print_status "iBilling - Professional Voice Billing System Installation Complete!"
-    print_status "============================================="
-    echo ""
-    print_status "System Information:"
-    echo "• Frontend URL: http://localhost (or your server IP)"
-    echo "• Backend API: http://localhost:3001"
-    echo "• Database: MariaDB on localhost:3306"
-    echo "• Database Name: asterisk"
-    echo "• Database User: asterisk"
-    echo "• Environment File: /opt/billing/web/backend/.env"
-    echo ""
-    print_status "Login Credentials:"
-    echo "• Admin Username: admin"
-    echo "• Admin Password: admin123"
-    echo ""
-    print_status "Database Credentials (SAVE THESE SECURELY):"
-    echo "• MySQL Root Password: ${mysql_root_password}"
-    echo "• Asterisk DB Password: ${asterisk_db_password}"
-    echo ""
-    print_status "Asterisk Billing Features Configured:"
-    echo "• Real-time call billing and authorization"
-    echo "• Prepaid/Postpaid customer support"
-    echo "• Rate-based call routing"
-    echo "• Connection fees and billing increments"
-    echo "• Balance checking and low balance warnings"
-    echo "• AGI scripts for call control"
-    echo "• ODBC realtime configuration"
-    echo ""
-    print_status "Sample Data Included:"
-    echo "• 8 sample customers with various account types"
-    echo "• 20 international rate destinations"
-    echo "• 10 DID numbers (some assigned, some available)"
-    echo "• 3 admin users with different roles"
-    echo "• 4 SIP trunks and 5 routes configured"
-    echo "• Sample CDR records, invoices, and payments"
-    echo "• SMS templates and support tickets"
-    echo "• Complete audit log entries"
-    echo ""
-    print_status "Troubleshooting Commands:"
-    echo "• Check backend logs: sudo journalctl -u ibilling-backend -f"
-    echo "• Restart backend: sudo systemctl restart ibilling-backend"
-    echo "• Test database: mysql -u asterisk -p${asterisk_db_password} -e 'USE asterisk; SELECT COUNT(*) FROM customers;'"
-    echo "• Check backend API: curl http://localhost:3001/health"
-    echo "• Verify data population: ./scripts/verify-database-population.sh"
-    echo "• Check Asterisk: sudo asterisk -rx 'core show version'"
-    echo "• Test ODBC: isql -v asterisk-connector asterisk ${asterisk_db_password}"
-    echo ""
-    print_status "Next Steps:"
-    echo "1. Test the web interface at http://your-server-ip"
-    echo "2. Login with admin/admin123 to access the admin panel"
-    echo "3. Review the sample data and customize as needed"
-    echo "4. Configure your domain name in Nginx if needed"
-    echo "5. Set up SSL certificates with: sudo certbot --nginx"
-    echo "6. Configure firewall rules for ports 80, 443, 5060-5061 (SIP)"
-    echo "7. Review Asterisk configuration in /etc/asterisk/"
-    echo "8. Test SIP endpoint registration: asterisk -rx 'pjsip show endpoints'"
-    echo "9. Monitor calls: asterisk -rx 'core show channels'"
-    echo ""
-    print_warning "Remember to:"
-    echo "• Change the default admin password after first login"
-    echo "• Configure backup procedures"
-    echo "• Set up monitoring"
-    echo "• Review security settings"
-    echo "• Customize sample data for your business needs"
-    echo "• Configure Asterisk AMI credentials for full integration"
-
-    print_status "Installation completed successfully with full Asterisk billing integration!"
-}
-
-# Main installation function
-main() {
-    # Check if running as root
-    if [[ $EUID -eq 0 ]]; then
-       print_error "This script should not be run as root for security reasons"
-       print_status "Please run as a regular user. The script will ask for sudo when needed."
-       exit 1
-    fi
-
-    # Check and setup sudo access
-    check_and_setup_sudo
-
-    print_status "Starting iBilling - Professional Voice Billing System installation on Debian 12..."
-
-    # 1. Clean existing Asterisk installations
-    clean_existing_asterisk
-
-    # 2. Create directory structure
-    print_status "Creating directory structure..."
-    create_directory "/opt/billing/web"
-    create_directory "/opt/billing/logs"
-    create_directory "/var/lib/asterisk/agi-bin" "asterisk:asterisk"
-    create_directory "/etc/asterisk/backup"
-
-    # 3. Create configuration files
     create_config_files
-
-    # 4. Update system and install dependencies
-    print_status "Updating system and installing dependencies..."
-    sudo apt update && sudo apt upgrade -y
-    sudo apt install -y mariadb-server git curl unixodbc unixodbc-dev libmariadb-dev odbc-mariadb \
-        wget build-essential subversion libjansson-dev libxml2-dev uuid-dev libsqlite3-dev \
-        libssl-dev libncurses5-dev libedit-dev libsrtp2-dev libspandsp-dev libtiff-dev \
-        libfftw3-dev libvorbis-dev libspeex-dev libopus-dev libgsm1-dev libnewt-dev \
-        libpopt-dev libical-dev libjack-dev liblua5.2-dev libsnmp-dev libcorosync-common-dev \
-        libradcli-dev libneon27-dev libgmime-3.0-dev liburiparser-dev libxslt1-dev \
-        python3-dev python3-pip nginx certbot python3-certbot-nginx libcurl4-openssl-dev \
-        php-cli php-mysql
-
-    # 5. Generate passwords
-    MYSQL_ROOT_PASSWORD=$(generate_password)
-    ASTERISK_DB_PASSWORD=$(generate_password)
-
-    # 6. Setup database with complete schema
-    print_status "Setting up database with complete schema..."
-    setup_database "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
-
-    # 7. Setup ODBC
-    print_status "Setting up ODBC..."
-    setup_odbc "${ASTERISK_DB_PASSWORD}"
-
-    # 8. Install and configure Asterisk 22
-    print_status "Installing Asterisk 22..."
-    install_asterisk_22 "${ASTERISK_DB_PASSWORD}"
-
-    # 9. Setup web stack
-    print_status "Setting up web stack..."
-    setup_web
-
-    # 10. Setup backend API
-    print_status "Setting up backend API..."
-    setup_backend "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
-
-    # 11. Setup Asterisk billing integration
-    print_status "Setting up Asterisk billing integration..."
-    setup_asterisk_billing "${ASTERISK_DB_PASSWORD}"
-
-    # 12. Populate database with sample data
-    print_status "Populating database..."
-    populate_database "${MYSQL_ROOT_PASSWORD}"
-
-    # 13. Finalize installation with Nginx config update and service restart
-    print_status "Finalizing installation..."
-    finalize_installation
-
-    # 14. Perform final system checks and display summary
-    perform_system_checks
-    display_installation_summary "${MYSQL_ROOT_PASSWORD}" "${ASTERISK_DB_PASSWORD}"
-
-    # 15. Cleanup temporary files
-    sudo rm -rf /tmp/ibilling-config
-
-    print_status "Installation completed successfully with Asterisk 22 and full ODBC/realtime integration!"
-}
-
-# Execute main function
-main "$@"
+    install_asterisk "$ASTERISK_DB_PASSWORD"
+fi
