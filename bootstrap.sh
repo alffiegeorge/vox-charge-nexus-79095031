@@ -23,32 +23,41 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to generate random password
+generate_password() {
+    openssl rand -base64 16 | tr -d "=+/" | cut -c1-12
+}
+
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
     print_error "Please do not run this script as root"
     exit 1
 fi
 
-# Get script arguments
+# Generate random passwords if not provided
 if [ $# -eq 0 ]; then
-    echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
-    echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
-    exit 1
-fi
-
-if [ $# -eq 2 ]; then
-    MYSQL_ROOT_PASSWORD=$1
-    ASTERISK_DB_PASSWORD=$2
+    print_status "No passwords provided, generating random passwords..."
+    MYSQL_ROOT_PASSWORD=$(generate_password)
+    ASTERISK_DB_PASSWORD=$(generate_password)
+    print_status "Generated MySQL root password: $MYSQL_ROOT_PASSWORD"
+    print_status "Generated Asterisk DB password: $ASTERISK_DB_PASSWORD"
+    print_status "Please save these passwords securely!"
 elif [ $# -eq 1 ]; then
     ASTERISK_DB_PASSWORD=$1
+    print_status "Using provided Asterisk DB password"
+elif [ $# -eq 2 ]; then
+    MYSQL_ROOT_PASSWORD=$1
+    ASTERISK_DB_PASSWORD=$2
+    print_status "Using provided passwords"
 else
-    echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
-    echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
+    echo "Usage: $0 [mysql_root_password] [asterisk_db_password]"
+    echo "   or: $0 [asterisk_db_password] (if MySQL is already configured)"
+    echo "   or: $0 (to generate random passwords)"
     exit 1
 fi
 
-# GitHub repository URL (adjust this to your actual repository)
-REPO_URL="https://raw.githubusercontent.com/your-username/ibilling/main"
+# GitHub repository URL - using the actual repository
+REPO_URL="https://raw.githubusercontent.com/alffiegeorge/vox-charge-nexus-79095031/refs/heads/main"
 
 # Create temporary directory for downloads
 TEMP_DIR="/tmp/ibilling-setup"
@@ -58,36 +67,33 @@ cd "$TEMP_DIR"
 
 print_status "Downloading iBilling installation files..."
 
-# Download all necessary files
+# Download file function with proper directory handling
 download_file() {
     local file_path=$1
     local url="${REPO_URL}/${file_path}"
-    
-    print_status "Downloading ${file_path}..."
-    if ! wget -q "$url" -O "$file_path"; then
-        print_error "Failed to download ${file_path}"
-        return 1
-    fi
+    local dir=$(dirname "$file_path")
     
     # Create directory structure if needed
-    local dir=$(dirname "$file_path")
     if [ "$dir" != "." ]; then
         mkdir -p "$dir"
-        mv "$(basename "$file_path")" "$file_path"
     fi
     
-    return 0
+    print_status "Downloading ${file_path}..."
+    if wget -q "$url" -O "$file_path"; then
+        return 0
+    else
+        print_error "Failed to download ${file_path} from ${url}"
+        return 1
+    fi
 }
 
-# List of files to download
+# List of files to download (only files that exist in the repository)
 files_to_download=(
+    "install.sh"
     "scripts/utils.sh"
     "scripts/debug-asterisk.sh"
-    "scripts/test-realtime.sh"
     "scripts/setup-database.sh"
-    "scripts/setup-odbc.sh"
     "scripts/setup-web.sh"
-    "scripts/make-executable.sh"
     "config/res_odbc.conf"
     "config/cdr_adaptive_odbc.conf"
     "config/extconfig.conf"
@@ -95,10 +101,7 @@ files_to_download=(
     "config/pjsip.conf"
     "config/odbcinst.ini"
     "config/odbc.ini.template"
-    "config/database-schema.sql"
-    "config/nginx-ibilling.conf"
     "backend/.env.example"
-    "install.sh"
 )
 
 # Download all files
@@ -109,20 +112,27 @@ for file in "${files_to_download[@]}"; do
     fi
 done
 
-# Check if any downloads failed
+# Check if any critical downloads failed
 if [ ${#failed_downloads[@]} -gt 0 ]; then
-    print_error "Failed to download the following files:"
+    print_warning "Some files failed to download:"
     for file in "${failed_downloads[@]}"; do
         echo "  - $file"
     done
-    print_error "Please check your internet connection and repository URL"
+    print_status "Continuing with available files..."
+fi
+
+# Check if install.sh was downloaded successfully
+if [ ! -f "install.sh" ]; then
+    print_error "Critical file install.sh not found. Cannot continue."
     exit 1
 fi
 
-print_status "All files downloaded successfully"
+print_status "Essential files downloaded successfully"
 
 # Make scripts executable
-chmod +x scripts/*.sh
+if [ -d "scripts" ]; then
+    chmod +x scripts/*.sh 2>/dev/null || true
+fi
 chmod +x install.sh
 
 print_status "Starting iBilling installation..."
@@ -137,6 +147,13 @@ fi
 # Check installation result
 if [ $? -eq 0 ]; then
     print_status "iBilling installation completed successfully!"
+    print_status ""
+    print_status "=== IMPORTANT INFORMATION ==="
+    if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
+        print_status "MySQL root password: $MYSQL_ROOT_PASSWORD"
+    fi
+    print_status "Asterisk DB password: $ASTERISK_DB_PASSWORD"
+    print_status "Please save these passwords securely!"
     print_status ""
     print_status "Next steps:"
     print_status "1. Configure your backend settings in /opt/billing/backend/.env"
