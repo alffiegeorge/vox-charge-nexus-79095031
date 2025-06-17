@@ -2,7 +2,7 @@
 #!/bin/bash
 
 # Asterisk installation script for iBilling
-source "$(dirname "$0")/scripts/utils.sh"
+source "scripts/utils.sh"
 
 install_asterisk() {
     local asterisk_db_password=$1
@@ -302,7 +302,11 @@ EOF
 
     # Create database tables
     print_status "Creating database tables..."
-    sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/config/database-schema.sql"
+    if [ -f "config/database-schema.sql" ]; then
+        sudo mysql -u root -p"${mysql_root_password}" asterisk < "config/database-schema.sql"
+    else
+        print_warning "Database schema file not found. Please run database setup separately."
+    fi
     
     print_status "Database setup completed successfully"
 }
@@ -333,7 +337,7 @@ configure_asterisk() {
     backup_file /etc/asterisk/pjsip.conf
     backup_file /etc/asterisk/extensions.conf
 
-    # Copy configuration templates
+    # Copy configuration templates from /tmp/ibilling-config/
     sudo cp /tmp/ibilling-config/res_odbc.conf /etc/asterisk/
     sudo cp /tmp/ibilling-config/cdr_adaptive_odbc.conf /etc/asterisk/
     sudo cp /tmp/ibilling-config/extconfig.conf /etc/asterisk/
@@ -452,6 +456,9 @@ EOF
         print_status "Check logs with: sudo journalctl -u asterisk -f"
     fi
 
+    # Clean up temporary files
+    sudo rm -rf /tmp/ibilling-config
+
     print_status "Asterisk 22 installation and ODBC/realtime configuration completed"
     print_status ""
     print_status "Verification commands:"
@@ -493,3 +500,5 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     create_config_files
     install_asterisk "$ASTERISK_DB_PASSWORD"
 fi
+EOF
+
