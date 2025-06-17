@@ -1,7 +1,8 @@
+
 #!/bin/bash
 
 # Asterisk installation script for iBilling
-source "$(dirname "$0")/utils.sh"
+source "$(dirname "$0")/scripts/utils.sh"
 
 install_asterisk() {
     local asterisk_db_password=$1
@@ -301,7 +302,7 @@ EOF
 
     # Create database tables
     print_status "Creating database tables..."
-    sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/../config/database-schema.sql"
+    sudo mysql -u root -p"${mysql_root_password}" asterisk < "$(dirname "$0")/config/database-schema.sql"
     
     print_status "Database setup completed successfully"
 }
@@ -341,6 +342,12 @@ configure_asterisk() {
 
     # Replace password placeholder in configuration files
     sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
+
+    # Setup ODBC system configuration
+    print_status "Setting up ODBC system configuration..."
+    sudo cp /tmp/ibilling-config/odbcinst.ini /etc/odbcinst.ini
+    sudo cp /tmp/ibilling-config/odbc.ini.template /etc/odbc.ini
+    sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/odbc.ini
 
     # Configure modules.conf to load ODBC and realtime modules
     print_status "Configuring modules.conf for ODBC and realtime..."
@@ -455,28 +462,26 @@ EOF
     print_status "- View logs: sudo journalctl -u asterisk -f"
     print_status ""
     print_status "Note: No endpoints will show until they are created in the database"
-    print_status "Use the iBilling web interface to create customer endpoints"
+    print_status "Use the test script: sudo bash scripts/test-realtime.sh <asterisk_db_password>"
 }
 
 # Execute if run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [ $# -eq 0 ]; then
         echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
-        exit 1
-    fi
-
-    if [ $# -eq 1 ]; then
-        echo "Usage: $0 <asterisk_db_password>"
+        echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
         exit 1
     fi
 
     if [ $# -eq 2 ]; then
         MYSQL_ROOT_PASSWORD=$1
         ASTERISK_DB_PASSWORD=$2
-    fi
-
-    if [ $# -eq 1 ]; then
+    elif [ $# -eq 1 ]; then
         ASTERISK_DB_PASSWORD=$1
+    else
+        echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
+        echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
+        exit 1
     fi
     
     setup_system
