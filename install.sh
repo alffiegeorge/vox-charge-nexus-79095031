@@ -266,10 +266,63 @@ setup_system() {
     # Install necessary packages
     sudo apt install -y wget mariadb-client net-tools vim git
 
+    # Fix locale issues
+    print_status "Fixing locale settings..."
+    sudo apt install -y locales
+    sudo locale-gen en_US.UTF-8
+    sudo update-locale LANG=en_US.UTF-8
+
     # Set timezone
     sudo timedatectl set-timezone UTC
     
     print_status "System setup completed"
+}
+
+check_mysql_access() {
+    local mysql_root_password=$1
+    
+    # Test if MySQL is accessible without password
+    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "MySQL root access available without password"
+        return 0
+    fi
+    
+    # Test if MySQL is accessible with provided password
+    if [ -n "$mysql_root_password" ] && mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "MySQL root access available with provided password"
+        return 0
+    fi
+    
+    return 1
+}
+
+secure_mysql() {
+    local mysql_root_password=$1
+    
+    print_status "Securing MariaDB installation..."
+    
+    # Check if we can access MySQL without password first
+    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "Setting up MySQL root password and security..."
+        mysql -u root <<EOF
+UPDATE mysql.user SET Password=PASSWORD('${mysql_root_password}') WHERE User='root';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;
+EOF
+        if [ $? -eq 0 ]; then
+            print_status "✓ MySQL secured successfully"
+            return 0
+        else
+            print_error "✗ Failed to secure MySQL"
+            return 1
+        fi
+    else
+        print_status "MySQL appears to already be secured"
+        return 0
+    fi
 }
 
 reset_database() {
@@ -281,8 +334,52 @@ reset_database() {
     # Stop any existing connections
     sudo systemctl stop asterisk 2>/dev/null || true
     
+    # Try to determine the correct way to connect to MySQL
+    local mysql_connect=""
+    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+        mysql_connect="mysql -u root"
+    elif [ -n "$mysql_root_password" ] && mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+        mysql_connect="mysql -u root -p${mysql_root_password}"
+    else
+        print_error "Cannot connect to MySQL. Please check your MySQL installation and root password."
+        print_status "Trying to reset MySQL root password..."
+        
+        # Stop MySQL
+        sudo systemctl stop mariadb
+        
+        # Start MySQL in safe mode
+        sudo mysqld_safe --skip-grant-tables --skip-networking &
+        sleep 5
+        
+        # Reset root password
+        mysql -u root <<EOF
+FLUSH PRIVILEGES;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
+FLUSH PRIVILEGES;
+EOF
+        
+        # Stop safe mode MySQL
+        sudo pkill mysqld_safe
+        sudo pkill mysqld
+        sleep 3
+        
+        # Start MySQL normally
+        sudo systemctl start mariadb
+        sleep 5
+        
+        mysql_connect="mysql -u root -p${mysql_root_password}"
+        
+        # Test connection
+        if ! $mysql_connect -e "SELECT 1;" >/dev/null 2>&1; then
+            print_error "Still cannot connect to MySQL after reset attempt"
+            exit 1
+        fi
+        
+        print_status "✓ MySQL root password reset successfully"
+    fi
+
     # Drop and recreate database
-    sudo mysql -u root -p"${mysql_root_password}" <<EOF
+    $mysql_connect <<EOF
 DROP DATABASE IF EXISTS asterisk;
 CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 DROP USER IF EXISTS 'asterisk'@'localhost';
@@ -307,16 +404,10 @@ setup_database() {
     sudo systemctl start mariadb
     sudo systemctl enable mariadb
 
-    # Secure MariaDB installation
-    print_status "Securing MariaDB installation..."
-    sudo mysql -u root <<EOF
-UPDATE mysql.user SET Password=PASSWORD('${mysql_root_password}') WHERE User='root';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-FLUSH PRIVILEGES;
-EOF
+    # Check MySQL access and secure if needed
+    if ! check_mysql_access "$mysql_root_password"; then
+        secure_mysql "$mysql_root_password"
+    fi
 
     # Reset database completely
     reset_database "$mysql_root_password" "$asterisk_db_password"
@@ -324,8 +415,7 @@ EOF
     # Create database tables using the schema file
     print_status "Creating database tables..."
     if [ -f "config/database-schema.sql" ]; then
-        sudo mysql -u root -p"${mysql_root_password}" asterisk < "config/database-schema.sql"
-        if [ $? -eq 0 ]; then
+        if mysql -u root -p"${mysql_root_password}" asterisk < "config/database-schema.sql"; then
             print_status "✓ Database schema applied successfully"
         else
             print_error "✗ Failed to apply database schema"
@@ -336,7 +426,7 @@ EOF
         
         # Create basic tables manually
         print_status "Creating basic tables manually..."
-        sudo mysql -u root -p"${mysql_root_password}" asterisk <<EOF
+        mysql -u root -p"${mysql_root_password}" asterisk <<EOF
 -- Basic CDR table
 CREATE TABLE IF NOT EXISTS cdr (
     id INT(11) NOT NULL AUTO_INCREMENT,
