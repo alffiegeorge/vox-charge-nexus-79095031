@@ -272,6 +272,33 @@ setup_system() {
     print_status "System setup completed"
 }
 
+reset_database() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
+    
+    print_status "Resetting database - dropping and recreating..."
+    
+    # Stop any existing connections
+    sudo systemctl stop asterisk 2>/dev/null || true
+    
+    # Drop and recreate database
+    sudo mysql -u root -p"${mysql_root_password}" <<EOF
+DROP DATABASE IF EXISTS asterisk;
+CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+DROP USER IF EXISTS 'asterisk'@'localhost';
+CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+    if [ $? -eq 0 ]; then
+        print_status "✓ Database reset completed successfully"
+    else
+        print_error "✗ Database reset failed"
+        exit 1
+    fi
+}
+
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -291,21 +318,84 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 FLUSH PRIVILEGES;
 EOF
 
-    # Create Asterisk database and user
-    print_status "Creating Asterisk database and user..."
-    sudo mysql -u root -p"${mysql_root_password}" <<EOF
-CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
-GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
-FLUSH PRIVILEGES;
-EOF
+    # Reset database completely
+    reset_database "$mysql_root_password" "$asterisk_db_password"
 
-    # Create database tables
+    # Create database tables using the schema file
     print_status "Creating database tables..."
     if [ -f "config/database-schema.sql" ]; then
         sudo mysql -u root -p"${mysql_root_password}" asterisk < "config/database-schema.sql"
+        if [ $? -eq 0 ]; then
+            print_status "✓ Database schema applied successfully"
+        else
+            print_error "✗ Failed to apply database schema"
+            exit 1
+        fi
     else
-        print_warning "Database schema file not found. Please run database setup separately."
+        print_warning "Database schema file not found at config/database-schema.sql"
+        
+        # Create basic tables manually
+        print_status "Creating basic tables manually..."
+        sudo mysql -u root -p"${mysql_root_password}" asterisk <<EOF
+-- Basic CDR table
+CREATE TABLE IF NOT EXISTS cdr (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    calldate DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
+    clid VARCHAR(80) NOT NULL DEFAULT '',
+    src VARCHAR(80) NOT NULL DEFAULT '',
+    dst VARCHAR(80) NOT NULL DEFAULT '',
+    dcontext VARCHAR(80) NOT NULL DEFAULT '',
+    channel VARCHAR(80) NOT NULL DEFAULT '',
+    dstchannel VARCHAR(80) NOT NULL DEFAULT '',
+    lastapp VARCHAR(80) NOT NULL DEFAULT '',
+    lastdata VARCHAR(80) NOT NULL DEFAULT '',
+    duration INT(11) NOT NULL DEFAULT '0',
+    billsec INT(11) NOT NULL DEFAULT '0',
+    disposition VARCHAR(45) NOT NULL DEFAULT '',
+    amaflags INT(11) NOT NULL DEFAULT '0',
+    accountcode VARCHAR(20) NOT NULL DEFAULT '',
+    uniqueid VARCHAR(32) NOT NULL DEFAULT '',
+    userfield VARCHAR(255) NOT NULL DEFAULT '',
+    PRIMARY KEY (id),
+    INDEX calldate_idx (calldate),
+    INDEX accountcode_idx (accountcode)
+);
+
+-- PJSIP realtime tables
+CREATE TABLE IF NOT EXISTS ps_endpoints (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    transport VARCHAR(40),
+    aors VARCHAR(200),
+    auth VARCHAR(40),
+    context VARCHAR(40) DEFAULT 'from-internal',
+    disallow VARCHAR(200) DEFAULT 'all',
+    allow VARCHAR(200) DEFAULT 'ulaw,alaw',
+    direct_media ENUM('yes','no') DEFAULT 'no'
+);
+
+CREATE TABLE IF NOT EXISTS ps_auths (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    auth_type ENUM('userpass','md5') DEFAULT 'userpass',
+    password VARCHAR(80),
+    username VARCHAR(40)
+);
+
+CREATE TABLE IF NOT EXISTS ps_aors (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    max_contacts INT DEFAULT 1,
+    remove_existing ENUM('yes','no') DEFAULT 'yes'
+);
+
+-- Basic customers table
+CREATE TABLE IF NOT EXISTS customers (
+    id VARCHAR(20) NOT NULL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Active', 'Suspended', 'Closed') NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+EOF
     fi
     
     print_status "Database setup completed successfully"
@@ -357,7 +447,7 @@ configure_asterisk() {
     print_status "Configuring modules.conf for ODBC and realtime..."
     
     # Create a clean modules.conf with required modules
-    sudo tee /etc/asterisk/modules.conf > /dev/null <<'EOF'
+    sudo tee /etc/asterisk/modules.conf > /dev/null <<EOF
 [modules]
 autoload=yes
 
@@ -398,7 +488,7 @@ EOF
         if echo "SELECT 1;" | isql -v asterisk-connector asterisk "${asterisk_db_password}" >/dev/null 2>&1; then
             print_status "✓ ODBC connection test successful"
         else
-            print_warning "⚠ ODBC connection test failed - check configuration"
+            print_warning "⚠ ODBC connection test failed - will retry after Asterisk restart"
         fi
     else
         print_warning "⚠ isql command not available for ODBC testing"
@@ -441,7 +531,14 @@ EOF
         if sudo asterisk -rx "odbc show all" 2>/dev/null | grep -q "asterisk.*Connected"; then
             print_status "✓ ODBC connection active in Asterisk"
         else
-            print_warning "⚠ ODBC connection not active in Asterisk"
+            print_warning "⚠ ODBC connection not active in Asterisk - restarting Asterisk"
+            sudo systemctl restart asterisk
+            sleep 10
+            if sudo asterisk -rx "odbc show all" 2>/dev/null | grep -q "asterisk.*Connected"; then
+                print_status "✓ ODBC connection active after restart"
+            else
+                print_error "✗ ODBC connection still not working"
+            fi
         fi
         
         # Check realtime configuration
@@ -469,7 +566,6 @@ EOF
     print_status "- View logs: sudo journalctl -u asterisk -f"
     print_status ""
     print_status "Note: No endpoints will show until they are created in the database"
-    print_status "Use the test script: sudo bash scripts/test-realtime.sh <asterisk_db_password>"
 }
 
 # Execute if run directly
@@ -500,5 +596,3 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     create_config_files
     install_asterisk "$ASTERISK_DB_PASSWORD"
 fi
-EOF
-
