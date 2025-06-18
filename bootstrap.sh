@@ -94,6 +94,7 @@ files_to_download=(
     "scripts/debug-asterisk.sh"
     "scripts/setup-database.sh"
     "scripts/setup-web.sh"
+    "scripts/install-asterisk.sh"
     "config/res_odbc.conf"
     "config/cdr_adaptive_odbc.conf"
     "config/extconfig.conf"
@@ -101,6 +102,7 @@ files_to_download=(
     "config/pjsip.conf"
     "config/odbcinst.ini"
     "config/odbc.ini.template"
+    "config/nginx-ibilling.conf"
     "backend/.env.example"
 )
 
@@ -147,6 +149,94 @@ fi
 # Check installation result
 if [ $? -eq 0 ]; then
     print_status "iBilling installation completed successfully!"
+    
+    # Setup web components
+    print_status "Setting up web frontend and Node.js..."
+    
+    # Create necessary directories
+    sudo mkdir -p /opt/billing/web
+    sudo mkdir -p /opt/billing/backend
+    
+    # Install Node.js if not present
+    if ! command -v node >/dev/null 2>&1; then
+        print_status "Installing Node.js..."
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+        sudo apt install -y nodejs
+    fi
+    
+    # Setup backend if scripts are available
+    if [ -f "scripts/setup-web.sh" ]; then
+        print_status "Running web setup script..."
+        sudo chmod +x scripts/setup-web.sh
+        sudo ./scripts/setup-web.sh
+    else
+        print_status "Setting up basic web environment..."
+        
+        # Setup basic Nginx configuration
+        sudo apt install -y nginx
+        
+        # Create a basic index.html
+        sudo tee /var/www/html/index.html > /dev/null <<'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>iBilling System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .status { padding: 20px; background: #f0f0f0; border-radius: 5px; margin: 20px 0; }
+        .success { background: #d4edda; color: #155724; }
+        .warning { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>iBilling System - Installation Complete</h1>
+        <div class="status success">
+            <h3>✓ System Status</h3>
+            <p>The iBilling system has been successfully installed with Asterisk 22 and ODBC support.</p>
+        </div>
+        
+        <div class="status warning">
+            <h3>⚠ Next Steps Required</h3>
+            <ul>
+                <li>Configure backend settings in <code>/opt/billing/backend/.env</code></li>
+                <li>Install and configure the React frontend</li>
+                <li>Start the backend service: <code>sudo systemctl start ibilling-backend</code></li>
+            </ul>
+        </div>
+        
+        <div class="status">
+            <h3>System Information</h3>
+            <p><strong>MySQL Root Password:</strong> Please check installation logs</p>
+            <p><strong>Asterisk DB Password:</strong> Please check installation logs</p>
+            <p><strong>Asterisk Status:</strong> <code>sudo systemctl status asterisk</code></p>
+            <p><strong>ODBC Status:</strong> <code>sudo asterisk -rx 'odbc show all'</code></p>
+        </div>
+        
+        <div class="status">
+            <h3>Manual Frontend Setup</h3>
+            <p>To complete the React frontend setup, run:</p>
+            <pre>
+cd /opt/billing/web
+sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git .
+sudo chown -R $USER:$USER /opt/billing/web
+npm install
+npm run build
+            </pre>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+        
+        # Start and enable Nginx
+        sudo systemctl enable nginx
+        sudo systemctl start nginx
+        
+        print_status "Basic web server configured at http://your-server-ip"
+    fi
+    
     print_status ""
     print_status "=== IMPORTANT INFORMATION ==="
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
@@ -157,13 +247,19 @@ if [ $? -eq 0 ]; then
     print_status ""
     print_status "Next steps:"
     print_status "1. Configure your backend settings in /opt/billing/backend/.env"
-    print_status "2. Start the backend service: sudo systemctl start ibilling-backend"
-    print_status "3. Access the web interface at http://your-server-ip"
+    print_status "2. Complete frontend setup if not automated:"
+    print_status "   cd /opt/billing/web"
+    print_status "   sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git ."
+    print_status "   sudo chown -R \$USER:\$USER /opt/billing/web"
+    print_status "   npm install && npm run build"
+    print_status "3. Start the backend service: sudo systemctl start ibilling-backend"
+    print_status "4. Access the web interface at http://your-server-ip"
     print_status ""
     print_status "For troubleshooting, check:"
     print_status "- Asterisk status: sudo systemctl status asterisk"
     print_status "- Backend logs: sudo journalctl -u ibilling-backend -f"
     print_status "- Nginx status: sudo systemctl status nginx"
+    print_status "- Node.js version: node --version"
 else
     print_error "Installation failed. Check the logs above for details."
     exit 1
