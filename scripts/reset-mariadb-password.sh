@@ -12,12 +12,17 @@ reset_mariadb_password() {
     echo ""
     print_status "=== MARIADB PASSWORD RESET ==="
     echo ""
+    sleep 1
+    
     print_status "This will reset the MariaDB root password to: $new_password"
     echo ""
+    sleep 1
     
     # Step 1: Identify database version
     print_status "Step 1: Identifying database version..."
-    sleep 0.5
+    echo ""
+    sleep 1
+    
     if command -v mysql >/dev/null 2>&1; then
         version_info=$(mysql --version 2>/dev/null || echo "MariaDB not accessible")
         print_status "Database version: $version_info"
@@ -25,103 +30,137 @@ reset_mariadb_password() {
         print_warning "MySQL/MariaDB command not found, assuming MariaDB is installed"
     fi
     echo ""
-    sleep 0.5
+    sleep 1
     
     # Step 2: Stop the database server
     print_status "Step 2: Stopping MariaDB server..."
-    sleep 0.5
-    sudo systemctl stop mariadb || true
-    sudo systemctl stop mysql || true
+    echo ""
+    sleep 1
     
-    # Kill any remaining processes
-    sudo pkill -9 -f mysqld || true
-    sudo pkill -9 -f mariadbd || true
+    print_status "Stopping MariaDB service..."
+    sudo systemctl stop mariadb >/dev/null 2>&1 || true
+    sudo systemctl stop mysql >/dev/null 2>&1 || true
+    sleep 2
+    
+    print_status "Killing remaining MariaDB processes..."
+    sudo pkill -9 -f mysqld >/dev/null 2>&1 || true
+    sudo pkill -9 -f mariadbd >/dev/null 2>&1 || true
     sleep 3
+    
     print_status "✓ MariaDB processes stopped"
     echo ""
+    sleep 1
     
     # Step 3: Start database without permission checking
     print_status "Step 3: Starting MariaDB in safe mode (without grant tables)..."
-    sleep 0.5
+    echo ""
+    sleep 1
     
     # Remove any existing socket files
-    sudo rm -f /var/run/mysqld/mysqld.sock || true
-    sudo rm -f /tmp/mysql.sock || true
+    print_status "Cleaning up socket files..."
+    sudo rm -f /var/run/mysqld/mysqld.sock >/dev/null 2>&1 || true
+    sudo rm -f /tmp/mysql.sock >/dev/null 2>&1 || true
+    sleep 1
     
     # Start MariaDB in safe mode
     print_status "Starting mysqld_safe with --skip-grant-tables --skip-networking..."
-    sleep 0.5
-    sudo mysqld_safe --skip-grant-tables --skip-networking &
+    echo ""
+    sleep 1
+    
+    # Redirect all mysqld_safe output to prevent interference
+    sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
     SAFE_PID=$!
     
     # Wait for the server to start
     print_status "Waiting for MariaDB to start in safe mode..."
     echo ""
-    sleep 10
     
-    # Test if we can connect
+    # Test connection with better timing
     local connection_attempts=0
-    while [ $connection_attempts -lt 10 ]; do
+    local max_attempts=15
+    
+    while [ $connection_attempts -lt $max_attempts ]; do
+        connection_attempts=$((connection_attempts + 1))
+        
+        print_status "Connection attempt $connection_attempts/$max_attempts..."
+        
         if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+            echo ""
             print_status "✓ Successfully connected to MariaDB in safe mode"
             echo ""
+            sleep 1
             break
         fi
-        sleep 2
-        connection_attempts=$((connection_attempts + 1))
-        print_status "Waiting for connection... (attempt $connection_attempts/10)"
+        
+        if [ $connection_attempts -lt $max_attempts ]; then
+            sleep 3
+        fi
     done
     
-    if [ $connection_attempts -eq 10 ]; then
+    if [ $connection_attempts -eq $max_attempts ]; then
         echo ""
-        print_error "Failed to connect to MariaDB in safe mode"
-        sudo kill $SAFE_PID 2>/dev/null || true
+        print_error "Failed to connect to MariaDB in safe mode after $max_attempts attempts"
+        echo ""
+        
+        # Clean up
+        if [ -n "$SAFE_PID" ]; then
+            sudo kill $SAFE_PID >/dev/null 2>&1 || true
+        fi
         return 1
     fi
     
     # Step 4: Change the root password
     print_status "Step 4: Changing root password..."
-    sleep 0.5
     echo ""
+    sleep 1
     
-    # Connect and change password
-    mysql -u root <<EOF
+    # Try ALTER USER method first
+    print_status "Attempting password change with ALTER USER..."
+    if mysql -u root >/dev/null 2>&1 <<EOF
 FLUSH PRIVILEGES;
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${new_password}';
 FLUSH PRIVILEGES;
 EOF
-    
-    if [ $? -eq 0 ]; then
+    then
         print_status "✓ Password changed successfully using ALTER USER"
         echo ""
+        password_changed=true
     else
-        print_warning "ALTER USER failed, trying alternative method..."
-        sleep 0.5
-        mysql -u root <<EOF
+        print_warning "ALTER USER failed, trying SET PASSWORD method..."
+        echo ""
+        sleep 1
+        
+        if mysql -u root >/dev/null 2>&1 <<EOF
 FLUSH PRIVILEGES;
 SET PASSWORD FOR 'root'@'localhost' = PASSWORD('${new_password}');
 FLUSH PRIVILEGES;
 EOF
-        
-        if [ $? -eq 0 ]; then
+        then
             print_status "✓ Password changed successfully using SET PASSWORD"
             echo ""
+            password_changed=true
         else
             print_warning "SET PASSWORD failed, trying UPDATE method..."
-            sleep 0.5
-            mysql -u root <<EOF
+            echo ""
+            sleep 1
+            
+            if mysql -u root >/dev/null 2>&1 <<EOF
 FLUSH PRIVILEGES;
 UPDATE mysql.user SET authentication_string = PASSWORD('${new_password}') WHERE User = 'root' AND Host = 'localhost';
 FLUSH PRIVILEGES;
 EOF
-            
-            if [ $? -eq 0 ]; then
+            then
                 print_status "✓ Password changed successfully using UPDATE"
                 echo ""
+                password_changed=true
             else
-                echo ""
                 print_error "All password change methods failed"
-                sudo kill $SAFE_PID 2>/dev/null || true
+                echo ""
+                
+                # Clean up
+                if [ -n "$SAFE_PID" ]; then
+                    sudo kill $SAFE_PID >/dev/null 2>&1 || true
+                fi
                 return 1
             fi
         fi
@@ -129,67 +168,98 @@ EOF
     
     # Step 5: Restart database server normally
     print_status "Step 5: Restarting MariaDB normally..."
-    sleep 0.5
     echo ""
+    sleep 1
     
     # Stop the safe mode instance
     print_status "Stopping safe mode instance..."
-    sleep 0.5
-    sudo kill $SAFE_PID 2>/dev/null || true
+    if [ -n "$SAFE_PID" ]; then
+        sudo kill $SAFE_PID >/dev/null 2>&1 || true
+    fi
+    sleep 2
     
-    # Alternative methods to stop mysqld_safe
+    # Alternative cleanup methods
     if [ -f /var/run/mysqld/mysqld.pid ]; then
-        sudo kill $(cat /var/run/mysqld/mysqld.pid) 2>/dev/null || true
+        sudo kill $(cat /var/run/mysqld/mysqld.pid) >/dev/null 2>&1 || true
     fi
     
     if [ -f /var/run/mariadb/mariadb.pid ]; then
-        sudo kill $(cat /var/run/mariadb/mariadb.pid) 2>/dev/null || true
+        sudo kill $(cat /var/run/mariadb/mariadb.pid) >/dev/null 2>&1 || true
     fi
     
-    # Make sure all processes are stopped
-    sudo pkill -f mysqld_safe || true
-    sudo pkill -f mysqld || true
-    sudo pkill -f mariadbd || true
-    sleep 5
+    # Ensure all processes are stopped
+    print_status "Ensuring all MariaDB processes are stopped..."
+    sudo pkill -f mysqld_safe >/dev/null 2>&1 || true
+    sudo pkill -f mysqld >/dev/null 2>&1 || true
+    sudo pkill -f mariadbd >/dev/null 2>&1 || true
+    sleep 3
     
     # Start MariaDB normally
     print_status "Starting MariaDB service normally..."
-    sleep 0.5
-    sudo systemctl start mariadb
-    
-    # Wait for service to be ready
-    sleep 5
-    print_status "✓ MariaDB service started"
     echo ""
+    sudo systemctl start mariadb >/dev/null 2>&1
+    
+    # Wait for service to be ready with status checks
+    print_status "Waiting for MariaDB service to be ready..."
+    local service_attempts=0
+    local max_service_attempts=10
+    
+    while [ $service_attempts -lt $max_service_attempts ]; do
+        service_attempts=$((service_attempts + 1))
+        
+        if sudo systemctl is-active --quiet mariadb; then
+            print_status "✓ MariaDB service is active"
+            break
+        fi
+        
+        print_status "Service start attempt $service_attempts/$max_service_attempts..."
+        sleep 2
+    done
+    
+    echo ""
+    sleep 1
     
     # Test the new password
     print_status "Testing new password..."
-    sleep 0.5
-    if mysql -u root -p"${new_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-        print_status "✓ Password reset successful!"
-        print_status "✓ MariaDB root password is now: ${new_password}"
-        echo ""
+    echo ""
+    sleep 1
+    
+    local password_test_attempts=0
+    local max_password_attempts=5
+    
+    while [ $password_test_attempts -lt $max_password_attempts ]; do
+        password_test_attempts=$((password_test_attempts + 1))
         
-        # Secure the installation
-        print_status "Securing MariaDB installation..."
-        sleep 0.5
-        mysql -u root -p"${new_password}" <<EOF
+        if mysql -u root -p"${new_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+            print_status "✓ Password reset successful!"
+            print_status "✓ MariaDB root password is now: ${new_password}"
+            echo ""
+            sleep 1
+            
+            # Secure the installation
+            print_status "Securing MariaDB installation..."
+            mysql -u root -p"${new_password}" >/dev/null 2>&1 <<EOF
 DELETE FROM mysql.user WHERE User='';
 DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
 DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 FLUSH PRIVILEGES;
 EOF
+            
+            print_status "✓ MariaDB installation secured"
+            echo ""
+            return 0
+        fi
         
-        print_status "✓ MariaDB installation secured"
-        echo ""
-        return 0
-        
-    else
-        echo ""
-        print_error "✗ Password reset failed - cannot connect with new password"
-        return 1
-    fi
+        if [ $password_test_attempts -lt $max_password_attempts ]; then
+            print_status "Password test attempt $password_test_attempts/$max_password_attempts failed, retrying..."
+            sleep 3
+        fi
+    done
+    
+    print_error "✗ Password reset failed - cannot connect with new password after $max_password_attempts attempts"
+    echo ""
+    return 1
 }
 
 # Display usage information
@@ -250,8 +320,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     print_warning "WARNING: This will reset the MariaDB root password!"
     print_status "New password will be: $new_password"
     echo ""
+    
     read -p "Continue? (y/N): " -n 1 -r
     echo ""
+    echo ""
+    
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         print_status "Operation cancelled"
         echo ""
