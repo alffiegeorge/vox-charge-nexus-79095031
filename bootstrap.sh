@@ -28,7 +28,40 @@ generate_password() {
     openssl rand -base64 16 | tr -d "=+/" | cut -c1-12
 }
 
-# ... keep existing code (MariaDB password reset function, emergency reset function) the same ...
+# Function to reset MariaDB password using the script
+reset_mariadb_password() {
+    local new_password=$1
+    
+    if [ -f "scripts/reset-mariadb-password.sh" ]; then
+        chmod +x scripts/reset-mariadb-password.sh
+        if ./scripts/reset-mariadb-password.sh "$new_password"; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        print_error "reset-mariadb-password.sh script not found"
+        return 1
+    fi
+}
+
+# Function to perform emergency MariaDB reset using the script
+emergency_mariadb_reset() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
+    
+    if [ -f "scripts/emergency-mariadb-reset.sh" ]; then
+        chmod +x scripts/emergency-mariadb-reset.sh
+        if ./scripts/emergency-mariadb-reset.sh "$mysql_root_password" "$asterisk_db_password"; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        print_error "emergency-mariadb-reset.sh script not found"
+        return 1
+    fi
+}
 
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
@@ -360,14 +393,24 @@ else
     exit 1
 fi
 
+# Run the installation script
+print_status "Running main installation script..."
+if [ -f "install.sh" ]; then
+    chmod +x install.sh
+    ./install.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
+else
+    print_warning "install.sh not found, continuing with manual setup..."
+fi
+
+# Run individual scripts from the scripts folder
+print_status "Running additional setup scripts..."
+
 # Run setup-database script if it exists
 if [ -f "scripts/setup-database.sh" ]; then
     print_status "Running setup-database.sh..."
     chmod +x scripts/setup-database.sh
     ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
 fi
-
-# ... keep existing code (ODBC setup) the same ...
 
 # Run setup-odbc script if it exists
 if [ -f "scripts/setup-odbc.sh" ]; then
@@ -429,8 +472,6 @@ if [ -f "scripts/setup-backend.sh" ]; then
     print_status "Running setup-backend.sh..."
     chmod +x scripts/setup-backend.sh
     ./scripts/setup-backend.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
-else
-    # ... keep existing code (backend environment setup, systemd service) the same ...
 fi
 
 # Run setup-web script if it exists
@@ -438,8 +479,6 @@ if [ -f "scripts/setup-web.sh" ]; then
     print_status "Running setup-web.sh..."
     chmod +x scripts/setup-web.sh
     ./scripts/setup-web.sh
-else
-    # ... keep existing code (Nginx setup) the same ...
 fi
 
 # Run setup-agi script if it exists
