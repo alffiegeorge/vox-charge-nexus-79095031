@@ -2,6 +2,24 @@
 #!/bin/bash
 
 # iBilling installation main script
+
+# Make scripts executable if they exist
+if [ -f "scripts/utils.sh" ]; then
+    chmod +x scripts/*.sh
+fi
+
+# Check if script files exist before sourcing
+if [ ! -f "scripts/utils.sh" ] || [ ! -f "scripts/database-manager.sh" ] || [ ! -f "scripts/config-generator.sh" ] || [ ! -f "scripts/asterisk-setup.sh" ] || [ ! -f "scripts/service-manager.sh" ]; then
+    echo "Error: Required script files are missing. Please ensure all script files are present in the scripts/ directory."
+    echo "Required files:"
+    echo "  - scripts/utils.sh"
+    echo "  - scripts/database-manager.sh" 
+    echo "  - scripts/config-generator.sh"
+    echo "  - scripts/asterisk-setup.sh"
+    echo "  - scripts/service-manager.sh"
+    exit 1
+fi
+
 source "scripts/utils.sh"
 source "scripts/database-manager.sh"
 source "scripts/config-generator.sh"
