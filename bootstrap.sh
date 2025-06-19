@@ -28,6 +28,195 @@ generate_password() {
     openssl rand -base64 16 | tr -d "=+/" | cut -c1-12
 }
 
+# MariaDB password reset function
+reset_mariadb_password() {
+    local new_password=${1:-"admin123"}
+    
+    print_status "=== MARIADB PASSWORD RESET ==="
+    print_status "Attempting to reset MariaDB root password to: $new_password"
+    
+    # Step 1: Stop the database server
+    print_status "Stopping MariaDB server..."
+    sudo systemctl stop mariadb || true
+    sudo systemctl stop mysql || true
+    
+    # Kill any remaining processes
+    sudo pkill -9 -f mysqld || true
+    sudo pkill -9 -f mariadbd || true
+    sleep 3
+    
+    # Step 2: Start database without permission checking
+    print_status "Starting MariaDB in safe mode (without grant tables)..."
+    
+    # Remove any existing socket files
+    sudo rm -f /var/run/mysqld/mysqld.sock || true
+    sudo rm -f /tmp/mysql.sock || true
+    
+    # Start MariaDB in safe mode
+    print_status "Starting mysqld_safe with --skip-grant-tables --skip-networking..."
+    sudo mysqld_safe --skip-grant-tables --skip-networking &
+    SAFE_PID=$!
+    
+    # Wait for the server to start
+    print_status "Waiting for MariaDB to start in safe mode..."
+    sleep 10
+    
+    # Test if we can connect
+    local connection_attempts=0
+    while [ $connection_attempts -lt 10 ]; do
+        if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+            print_status "✓ Successfully connected to MariaDB in safe mode"
+            break
+        fi
+        sleep 2
+        connection_attempts=$((connection_attempts + 1))
+        print_status "Waiting for connection... (attempt $connection_attempts/10)"
+    done
+    
+    if [ $connection_attempts -eq 10 ]; then
+        print_error "Failed to connect to MariaDB in safe mode"
+        sudo kill $SAFE_PID 2>/dev/null || true
+        return 1
+    fi
+    
+    # Step 3: Change the root password
+    print_status "Changing root password..."
+    
+    # Connect and change password
+    mysql -u root <<EOF
+FLUSH PRIVILEGES;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${new_password}';
+FLUSH PRIVILEGES;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_status "✓ Password changed successfully using ALTER USER"
+    else
+        print_warning "ALTER USER failed, trying alternative method..."
+        mysql -u root <<EOF
+FLUSH PRIVILEGES;
+SET PASSWORD FOR 'root'@'localhost' = PASSWORD('${new_password}');
+FLUSH PRIVILEGES;
+EOF
+        
+        if [ $? -eq 0 ]; then
+            print_status "✓ Password changed successfully using SET PASSWORD"
+        else
+            print_warning "SET PASSWORD failed, trying UPDATE method..."
+            mysql -u root <<EOF
+FLUSH PRIVILEGES;
+UPDATE mysql.user SET authentication_string = PASSWORD('${new_password}') WHERE User = 'root' AND Host = 'localhost';
+FLUSH PRIVILEGES;
+EOF
+            
+            if [ $? -eq 0 ]; then
+                print_status "✓ Password changed successfully using UPDATE"
+            else
+                print_error "All password change methods failed"
+                sudo kill $SAFE_PID 2>/dev/null || true
+                return 1
+            fi
+        fi
+    fi
+    
+    # Step 4: Restart database server normally
+    print_status "Restarting MariaDB normally..."
+    
+    # Stop the safe mode instance
+    print_status "Stopping safe mode instance..."
+    sudo kill $SAFE_PID 2>/dev/null || true
+    
+    # Make sure all processes are stopped
+    sudo pkill -f mysqld_safe || true
+    sudo pkill -f mysqld || true
+    sudo pkill -f mariadbd || true
+    sleep 5
+    
+    # Start MariaDB normally
+    print_status "Starting MariaDB service normally..."
+    sudo systemctl start mariadb
+    
+    # Wait for service to be ready
+    sleep 5
+    
+    # Test the new password
+    print_status "Testing new password..."
+    if mysql -u root -p"${new_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "✓ Password reset successful!"
+        print_status "✓ MariaDB root password is now: ${new_password}"
+        return 0
+    else
+        print_error "✗ Password reset failed - cannot connect with new password"
+        return 1
+    fi
+}
+
+# Emergency MariaDB reset function
+emergency_mariadb_reset() {
+    local mysql_root_password=${1:-"admin123"}
+    local asterisk_db_password=${2:-"asterisk123"}
+    
+    print_status "=== EMERGENCY MARIADB RESET ==="
+    print_warning "Performing complete MariaDB reset due to severe issues..."
+    
+    # Kill all processes
+    print_status "Killing all MySQL/MariaDB processes..."
+    sudo pkill -9 -f mysqld || true
+    sudo pkill -9 -f mariadbd || true
+    sudo pkill -9 -f mysqld_safe || true
+    sleep 5
+    
+    # Stop services
+    sudo systemctl stop mariadb || true
+    sudo systemctl stop mysql || true
+    sleep 3
+    
+    # Remove socket files
+    sudo rm -f /var/run/mysqld/mysqld.sock || true
+    sudo rm -f /tmp/mysql.sock || true
+    
+    # Backup and remove data directory
+    if [ -d "/var/lib/mysql" ]; then
+        sudo mv /var/lib/mysql "/var/lib/mysql.backup.$(date +%Y%m%d_%H%M%S)" || true
+    fi
+    
+    # Purge and reinstall
+    print_status "Purging and reinstalling MariaDB..."
+    sudo apt remove --purge -y mariadb-server mariadb-client mariadb-common mysql-common || true
+    sudo apt autoremove -y || true
+    sudo rm -rf /etc/mysql || true
+    sudo rm -rf /var/lib/mysql || true
+    
+    sudo apt update
+    sudo apt install -y mariadb-server mariadb-client
+    
+    # Setup directories
+    sudo mkdir -p /var/run/mysqld
+    sudo chown mysql:mysql /var/run/mysqld
+    
+    # Start MariaDB
+    sudo systemctl enable mariadb
+    sudo systemctl start mariadb
+    sleep 10
+    
+    # Configure database
+    sudo mysql -u root <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
+CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_status "✓ Emergency reset successful!"
+        return 0
+    else
+        print_error "✗ Emergency reset failed"
+        return 1
+    fi
+}
+
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
     print_error "Please do not run this script as root"
@@ -128,77 +317,46 @@ else
     print_warning "No package.json found in root directory"
 fi
 
-# FIRST: Completely reset database authentication
-print_status "Resetting database authentication completely..."
-if [ -f "scripts/clean-database.sh" ]; then
-    chmod +x scripts/clean-database.sh
-    if ./scripts/clean-database.sh "$MYSQL_ROOT_PASSWORD"; then
-        print_status "✓ Database cleaned successfully"
-    else
-        print_error "Database cleanup failed"
-        exit 1
-    fi
-else
-    print_warning "Clean database script not found, proceeding with manual cleanup..."
-    
-    # Manual database cleanup
-    print_status "Stopping MariaDB..."
-    sudo systemctl stop mariadb || true
-    sleep 3
-    
-    # Start in safe mode
-    print_status "Starting MariaDB in safe mode..."
-    sudo mysqld_safe --skip-grant-tables --skip-networking &
-    sleep 5
-    
-    # Reset everything
-    print_status "Resetting database completely..."
-    mysql -u root <<EOF
-FLUSH PRIVILEGES;
-DROP DATABASE IF EXISTS asterisk;
-DROP USER IF EXISTS 'asterisk'@'localhost';
-DROP USER IF EXISTS 'asterisk'@'%';
-DELETE FROM mysql.user WHERE User='asterisk';
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
-FLUSH PRIVILEGES;
-EOF
-    
-    # Stop safe mode and restart normally
-    sudo pkill mysqld_safe 2>/dev/null || true
-    sudo pkill mysqld 2>/dev/null || true
-    sleep 3
-    sudo systemctl start mariadb
-    sleep 5
-fi
+# Database setup with fallback methods
+print_status "Setting up database with fallback methods..."
 
-# SECOND: Set up database with proper authentication
-print_status "Setting up database with proper authentication..."
-if [ -f "scripts/fix-database-auth.sh" ]; then
-    chmod +x scripts/fix-database-auth.sh
-    if ./scripts/fix-database-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
-        print_status "✓ Database authentication configured successfully"
-    else
-        print_error "Database authentication setup failed"
-        exit 1
-    fi
-else
-    print_status "Manually setting up database..."
+# Method 1: Try password reset first
+print_status "Method 1: Attempting MariaDB password reset..."
+if reset_mariadb_password "$MYSQL_ROOT_PASSWORD"; then
+    print_status "✓ MariaDB password reset successful!"
     
-    # Create database and user
-    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+    # Create asterisk database and user
+    print_status "Creating asterisk database and user..."
+    mysql -u root -p"$MYSQL_ROOT_PASSWORD" <<EOF
 CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${ASTERISK_DB_PASSWORD}';
+CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '$ASTERISK_DB_PASSWORD';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
 EOF
     
     if [ $? -eq 0 ]; then
-        print_status "✓ Database and user created successfully"
+        print_status "✓ Asterisk database and user created successfully"
     else
-        print_error "Failed to create database and user"
+        print_error "Failed to create asterisk database, trying emergency reset..."
+        if emergency_mariadb_reset "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+            print_status "✓ Emergency reset successful!"
+        else
+            print_error "All database setup methods failed"
+            exit 1
+        fi
+    fi
+else
+    print_warning "Password reset failed, trying emergency reset..."
+    if emergency_mariadb_reset "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+        print_status "✓ Emergency reset successful!"
+    else
+        print_error "All database setup methods failed"
         exit 1
     fi
 fi
+
+# Continue with existing bootstrap code...
+# ... keep existing code (ODBC setup, backend configuration, build, systemd service, nginx setup) the same ...
 
 # THIRD: Set up ODBC with verified database connection
 print_status "Configuring ODBC for database connection..."
