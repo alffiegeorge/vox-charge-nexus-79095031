@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # iBilling Bootstrap Script
@@ -388,7 +389,11 @@ else
     exit 1
 fi
 
-# Run the installation script
+# Export passwords for use by other scripts
+export MYSQL_ROOT_PASSWORD
+export ASTERISK_DB_PASSWORD
+
+# Run the installation script with passwords
 print_status "Running main installation script..."
 if [ -f "install.sh" ]; then
     chmod +x install.sh
@@ -473,7 +478,8 @@ fi
 if [ -f "scripts/setup-web.sh" ]; then
     print_status "Running setup-web.sh..."
     chmod +x scripts/setup-web.sh
-    ./scripts/setup-web.sh
+    # Pass environment variables to setup-web.sh
+    MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" ASTERISK_DB_PASSWORD="$ASTERISK_DB_PASSWORD" ./scripts/setup-web.sh
 fi
 
 # Run setup-agi script if it exists
@@ -500,18 +506,37 @@ else
     sudo journalctl -u ibilling-backend --no-pager -n 20
 fi
 
+# Fix realtime authentication dynamically after Asterisk installation
+print_status "Fixing realtime authentication..."
+if [ -f "scripts/fix-realtime-auth.sh" ]; then
+    chmod +x scripts/fix-realtime-auth.sh
+    if ./scripts/fix-realtime-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+        print_status "✓ Realtime authentication fixed successfully"
+        
+        # Test realtime functionality
+        if [ -f "scripts/test-realtime-complete.sh" ]; then
+            print_status "Testing realtime functionality..."
+            chmod +x scripts/test-realtime-complete.sh
+            if ./scripts/test-realtime-complete.sh "$ASTERISK_DB_PASSWORD"; then
+                print_status "✓ Realtime functionality test passed"
+            else
+                print_warning "⚠ Realtime functionality test encountered issues"
+            fi
+        fi
+    else
+        print_warning "⚠ Realtime authentication fix encountered issues"
+        print_status "You can manually fix this later by running:"
+        print_status "sudo ./scripts/fix-realtime-auth.sh $MYSQL_ROOT_PASSWORD $ASTERISK_DB_PASSWORD"
+    fi
+else
+    print_warning "⚠ Realtime authentication fix script not found"
+fi
+
 # Run system checks
 if [ -f "scripts/system-checks.sh" ]; then
     print_status "Running system-checks.sh..."
     chmod +x scripts/system-checks.sh
     ./scripts/system-checks.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
-fi
-
-# Run test-realtime script to verify PJSIP realtime
-if [ -f "scripts/test-realtime.sh" ]; then
-    print_status "Running test-realtime.sh..."
-    chmod +x scripts/test-realtime.sh
-    ./scripts/test-realtime.sh "$ASTERISK_DB_PASSWORD"
 fi
 
 # Update database schema with additional tables
@@ -528,11 +553,12 @@ if [ -f "scripts/verify-database-population.sh" ]; then
     ./scripts/verify-database-population.sh "$MYSQL_ROOT_PASSWORD"
 fi
 
-# Add sample DIDs
+# Add sample DIDs with correct password
 if [ -f "scripts/add-sample-dids.sh" ]; then
     print_status "Running add-sample-dids.sh..."
     chmod +x scripts/add-sample-dids.sh
-    DB_PASSWORD="$ASTERISK_DB_PASSWORD" ./scripts/add-sample-dids.sh
+    # Use the correct password variable name
+    MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" DB_PASSWORD="$ASTERISK_DB_PASSWORD" ./scripts/add-sample-dids.sh
 fi
 
 # Restart Asterisk to load new configurations
@@ -577,7 +603,8 @@ print_status "- Nginx status: sudo systemctl status nginx"
 print_status "- Database: mysql -u asterisk -p${ASTERISK_DB_PASSWORD} asterisk"
 print_status "- Asterisk status: sudo systemctl status asterisk"
 print_status ""
-print_status "ODBC can be tested after Asterisk installation with:"
+print_status "ODBC connection status can be checked with:"
+print_status "- sudo asterisk -rx 'odbc show all'"
 print_status "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
 
 print_status "Bootstrap completed successfully!"
