@@ -41,17 +41,17 @@ fix_pjsip_realtime() {
     # 4. Create ps_endpoint_id_ips table if missing for endpoint discovery
     print_status "4. Ensuring endpoint discovery table exists..."
     mysql -u asterisk -p"${asterisk_db_password}" asterisk <<EOF
--- Create ps_endpoint_id_ips table if it doesn't exist
+-- Create ps_endpoint_id_ips table if it doesn't exist (match is a reserved keyword, so use backticks)
 CREATE TABLE IF NOT EXISTS ps_endpoint_id_ips (
     id VARCHAR(40) NOT NULL,
     endpoint VARCHAR(40) NOT NULL,
-    match VARCHAR(80) NOT NULL,
+    \`match\` VARCHAR(80) NOT NULL,
     PRIMARY KEY (id),
     FOREIGN KEY (endpoint) REFERENCES ps_endpoints(id) ON DELETE CASCADE
 );
 
 -- Add endpoint discovery entries for existing endpoints
-INSERT IGNORE INTO ps_endpoint_id_ips (id, endpoint, match) 
+INSERT IGNORE INTO ps_endpoint_id_ips (id, endpoint, \`match\`) 
 SELECT CONCAT(id, '_ip'), id, '0.0.0.0/0.0.0.0' FROM ps_endpoints;
 EOF
     
