@@ -142,6 +142,12 @@ const Customers = () => {
       // Use apiClient.request to make authenticated request
       const data = await apiClient.request<SipCredentials>(`/api/customers/${customerId}/sip-credentials`);
       console.log('SIP credentials received successfully:', data);
+      
+      // Ensure the SIP domain uses the correct server IP instead of localhost
+      if (data && data.sip_domain === 'localhost') {
+        data.sip_domain = '172.31.10.10';
+      }
+      
       setSipCredentials(data);
     } catch (error) {
       console.error('Error fetching SIP credentials:', error);
@@ -260,7 +266,13 @@ const Customers = () => {
       console.log('Creating SIP endpoint for customer:', customerId);
       
       const response = await apiClient.request(`/api/customers/${customerId}/create-sip-endpoint`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          server_ip: '172.31.10.10' // Ensure the correct server IP is used
+        })
       });
       
       console.log('SIP endpoint created successfully:', response);
