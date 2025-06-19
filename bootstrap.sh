@@ -103,6 +103,30 @@ if ! command -v node >/dev/null 2>&1; then
     sudo apt install -y nodejs
 fi
 
+# Install backend dependencies BEFORE running the main installation
+print_status "Installing backend dependencies..."
+if [ -d "backend" ]; then
+    cd backend
+    if [ -f "package.json" ]; then
+        npm install
+        print_status "✓ Backend dependencies installed"
+    else
+        print_warning "No package.json found in backend directory"
+    fi
+    cd ..
+else
+    print_warning "Backend directory not found"
+fi
+
+# Install frontend dependencies
+print_status "Installing frontend dependencies..."
+if [ -f "package.json" ]; then
+    npm install
+    print_status "✓ Frontend dependencies installed"
+else
+    print_warning "No package.json found in root directory"
+fi
+
 # Run the installation script
 print_status "Starting iBilling installation..."
 if [ -n "$MYSQL_ROOT_PASSWORD" ] && [ -n "$ASTERISK_DB_PASSWORD" ]; then
@@ -118,15 +142,6 @@ fi
 if [ $? -eq 0 ]; then
     print_status "iBilling core installation completed successfully!"
     
-    # Install npm dependencies
-    print_status "Installing npm dependencies..."
-    if npm install; then
-        print_status "Dependencies installed successfully"
-    else
-        print_error "Failed to install dependencies"
-        exit 1
-    fi
-
     # Build the project
     print_status "Building the project..."
     if npm run build; then
@@ -135,6 +150,63 @@ if [ $? -eq 0 ]; then
         print_error "Failed to build project"
         exit 1
     fi
+    
+    # Setup backend environment with correct database password
+    print_status "Configuring backend environment..."
+    
+    # Generate JWT secret
+    local jwt_secret=$(openssl rand -base64 32)
+    
+    # Create/update backend environment file
+    sudo tee /opt/billing/web/backend/.env > /dev/null <<EOL
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=asterisk
+DB_USER=asterisk
+DB_PASSWORD=${ASTERISK_DB_PASSWORD}
+
+# JWT Configuration
+JWT_SECRET=${jwt_secret}
+
+# Server Configuration
+PORT=3001
+NODE_ENV=production
+
+# Asterisk Configuration
+ASTERISK_HOST=localhost
+ASTERISK_PORT=5038
+ASTERISK_USERNAME=admin
+ASTERISK_SECRET=
+EOL
+
+    # Set proper permissions
+    sudo chmod 600 /opt/billing/web/backend/.env
+    sudo chown "$current_user:$current_user" /opt/billing/web/backend/.env
+    
+    # Update systemd service to use correct working directory
+    print_status "Updating systemd service..."
+    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOL
+[Unit]
+Description=iBilling Backend API Server
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=$current_user
+WorkingDirectory=/opt/billing/web/backend
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/billing/web/backend/.env
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+    # Reload systemd
+    sudo systemctl daemon-reload
     
     # Setup Nginx
     print_status "Configuring Nginx..."
@@ -147,14 +219,57 @@ if [ $? -eq 0 ]; then
     sudo rm -f /etc/nginx/sites-enabled/ibilling
     sudo rm -f /etc/nginx/sites-available/ibilling
     
-    # Copy Nginx configuration
-    if [ -f "config/nginx-ibilling.conf" ]; then
-        sudo cp "config/nginx-ibilling.conf" /etc/nginx/sites-available/ibilling
-        print_status "Nginx configuration copied"
-    else
-        print_error "Nginx configuration file not found"
-        exit 1
-    fi
+    # Create Nginx configuration
+    sudo tee /etc/nginx/sites-available/ibilling > /dev/null <<EOL
+server {
+    listen 80;
+    server_name _;
+    
+    root /opt/billing/web/dist;
+    index index.html;
+    
+    # Frontend static files
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+    
+    # API proxy to backend
+    location /api/ {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+    
+    # Auth routes
+    location /auth/ {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+    
+    # Health check
+    location /health {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOL
 
     # Enable the site
     sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
@@ -170,6 +285,23 @@ if [ $? -eq 0 ]; then
         exit 1
     fi
     
+    # Start the backend service
+    print_status "Starting backend service..."
+    sudo systemctl enable ibilling-backend
+    sudo systemctl restart ibilling-backend
+    
+    # Wait for service to start
+    sleep 5
+    
+    # Check service status
+    if sudo systemctl is-active --quiet ibilling-backend; then
+        print_status "✓ Backend service is running"
+    else
+        print_error "✗ Backend service failed to start"
+        print_status "Checking service logs..."
+        sudo journalctl -u ibilling-backend --no-pager -n 20
+    fi
+    
     print_status ""
     print_status "=== INSTALLATION COMPLETED SUCCESSFULLY ==="
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
@@ -181,14 +313,14 @@ if [ $? -eq 0 ]; then
     print_status "Installation location: /opt/billing/web"
     print_status ""
     print_status "Next steps:"
-    print_status "1. Start the backend service: sudo systemctl start ibilling-backend"
-    print_status "2. Access the web interface at http://your-server-ip"
+    print_status "1. Access the web interface at http://172.31.10.10"
+    print_status "2. Login with admin/admin123"
     print_status ""
     print_status "For troubleshooting, check:"
-    print_status "- Asterisk status: sudo systemctl status asterisk"
+    print_status "- Backend service: sudo systemctl status ibilling-backend"
     print_status "- Backend logs: sudo journalctl -u ibilling-backend -f"
     print_status "- Nginx status: sudo systemctl status nginx"
-    print_status "- Node.js version: node --version"
+    print_status "- Database: mysql -u asterisk -p"
 else
     print_error "Installation failed. Check the logs above for details."
     exit 1
