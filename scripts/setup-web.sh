@@ -20,26 +20,15 @@ setup_nodejs() {
 setup_frontend() {
     print_status "Setting up iBilling frontend..."
     
-    # Create web directory if it doesn't exist
-    sudo mkdir -p /opt/billing/web
-    cd /opt/billing/web
-
-    # Remove existing files if any
-    sudo rm -rf ./* 2>/dev/null || true
-    sudo rm -rf ./.* 2>/dev/null || true
-
-    # Clone the repository
-    print_status "Cloning repository..."
-    if sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git .; then
-        print_status "Repository cloned successfully"
+    # Check if we're already in the correct directory
+    if [ "$(pwd)" = "/opt/billing/web" ] && [ -f "package.json" ]; then
+        print_status "Already in correct directory with package.json"
+        current_user=$(whoami)
+        sudo chown -R "$current_user:$current_user" /opt/billing/web
     else
-        print_error "Failed to clone repository"
+        print_error "Not in correct directory or package.json missing"
         return 1
     fi
-
-    # Set permissions for the current user
-    current_user=$(whoami)
-    sudo chown -R "$current_user:$current_user" /opt/billing/web
 
     # Install npm dependencies
     print_status "Installing npm dependencies..."
@@ -57,6 +46,24 @@ setup_frontend() {
     else
         print_error "Failed to build project"
         return 1
+    fi
+}
+
+setup_backend_dependencies() {
+    print_status "Setting up backend dependencies..."
+    
+    if [ -d "/opt/billing/web/backend" ] && [ -f "/opt/billing/web/backend/package.json" ]; then
+        cd /opt/billing/web/backend
+        print_status "Installing backend dependencies..."
+        if npm install; then
+            print_status "Backend dependencies installed successfully"
+        else
+            print_error "Failed to install backend dependencies"
+            return 1
+        fi
+        cd /opt/billing/web
+    else
+        print_warning "Backend directory or package.json not found, skipping backend dependencies"
     fi
 }
 
@@ -132,6 +139,12 @@ setup_web_stack() {
     setup_frontend
     if [ $? -ne 0 ]; then
         print_error "Frontend setup failed"
+        return 1
+    fi
+    
+    setup_backend_dependencies
+    if [ $? -ne 0 ]; then
+        print_error "Backend dependencies setup failed"
         return 1
     fi
     

@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling Bootstrap Script
@@ -28,7 +27,7 @@ generate_password() {
     openssl rand -base64 16 | tr -d "=+/" | cut -c1-12
 }
 
-# Function to reset MariaDB password using the script
+# Function to perform password reset using MariaDB scripts
 reset_mariadb_password() {
     local new_password=$1
     
@@ -45,7 +44,7 @@ reset_mariadb_password() {
     fi
 }
 
-# Function to perform emergency MariaDB reset using the script
+# Function to perform emergency MariaDB reset
 emergency_mariadb_reset() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
@@ -106,7 +105,7 @@ if [ -d "web" ]; then
     sudo rm -rf web
 fi
 
-# Clone the repository
+# Clone the repository ONCE
 print_status "Cloning iBilling repository..."
 if sudo git clone "$REPO_URL" web; then
     print_status "Repository cloned successfully"
@@ -145,19 +144,15 @@ if ! command -v node >/dev/null 2>&1; then
     sudo apt install -y nodejs
 fi
 
-# Install backend dependencies BEFORE running the main installation
+# Install backend dependencies FIRST in the correct location
 print_status "Installing backend dependencies..."
-if [ -d "backend" ]; then
+if [ -d "backend" ] && [ -f "backend/package.json" ]; then
     cd backend
-    if [ -f "package.json" ]; then
-        npm install
-        print_status "✓ Backend dependencies installed"
-    else
-        print_warning "No package.json found in backend directory"
-    fi
+    npm install
+    print_status "✓ Backend dependencies installed"
     cd ..
 else
-    print_warning "Backend directory not found"
+    print_warning "Backend directory or package.json not found"
 fi
 
 # Install frontend dependencies
