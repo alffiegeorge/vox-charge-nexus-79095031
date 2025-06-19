@@ -8,19 +8,26 @@ setup_nodejs_backend() {
     print_status "Setting up Node.js backend..."
     
     # Create backend directory if it doesn't exist
-    create_directory "/opt/billing/backend"
+    create_directory "/opt/billing/web/backend"
     
     # Copy backend files
     print_status "Copying backend application files..."
-    sudo cp -r "$(dirname "$0")/../backend/"* /opt/billing/backend/
+    if [ -d "backend" ]; then
+        sudo cp -r backend/* /opt/billing/web/backend/
+    else
+        print_error "Backend directory not found in current location"
+        return 1
+    fi
     
     # Set proper ownership
-    sudo chown -R $USER:$USER /opt/billing/backend
+    sudo chown -R $USER:$USER /opt/billing/web/backend
     
     # Install dependencies
     print_status "Installing backend dependencies..."
-    cd /opt/billing/backend
-    npm install
+    cd /opt/billing/web/backend
+    
+    # Install asterisk-manager dependency that was missing
+    npm install asterisk-manager mysql2 express cors jsonwebtoken bcryptjs dotenv
     
     print_status "Backend setup completed"
 }
@@ -28,7 +35,7 @@ setup_nodejs_backend() {
 create_backend_service() {
     print_status "Creating systemd service for backend..."
     
-    # Create systemd service file
+    # Create systemd service file with correct paths
     sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
 [Unit]
 Description=iBilling Backend API Server
@@ -37,12 +44,12 @@ After=network.target mysql.service
 [Service]
 Type=simple
 User=$USER
-WorkingDirectory=/opt/billing/backend
+WorkingDirectory=/opt/billing/web/backend
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-EnvironmentFile=-/opt/billing/.env
+EnvironmentFile=/opt/billing/web/backend/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -74,7 +81,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Insert default admin user (password: admin123)
--- Hash generated with: echo 'admin123' | bcrypt-cli
+-- Hash generated with bcrypt for admin123
 INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
 ('admin', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
 EOF
@@ -90,8 +97,8 @@ setup_backend_environment() {
     # Generate JWT secret
     local jwt_secret=$(openssl rand -base64 32)
     
-    # Create environment file
-    sudo tee /opt/billing/.env > /dev/null <<EOF
+    # Create environment file in the correct location
+    sudo tee /opt/billing/web/backend/.env > /dev/null <<EOF
 # Database Configuration
 DB_HOST=localhost
 DB_PORT=3306
@@ -114,8 +121,8 @@ ASTERISK_SECRET=
 EOF
 
     # Set proper permissions
-    sudo chmod 600 /opt/billing/.env
-    sudo chown $USER:$USER /opt/billing/.env
+    sudo chmod 600 /opt/billing/web/backend/.env
+    sudo chown $USER:$USER /opt/billing/web/backend/.env
     
     print_status "Backend environment configured"
 }
@@ -123,16 +130,20 @@ EOF
 start_backend_service() {
     print_status "Starting backend service..."
     
+    # Stop any existing service
+    sudo systemctl stop ibilling-backend 2>/dev/null || true
+    
+    # Start the service
     sudo systemctl start ibilling-backend
     
     # Wait a moment and check if service started successfully
-    sleep 3
+    sleep 5
     
     if sudo systemctl is-active --quiet ibilling-backend; then
         print_status "✓ Backend service started successfully"
         
         # Test the API endpoint
-        sleep 2
+        sleep 3
         if curl -s http://localhost:3001/health > /dev/null; then
             print_status "✓ Backend API is responding"
         else

@@ -11,7 +11,7 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-EnvironmentFile=-/opt/billing/web/backend/.env
+EnvironmentFile=/opt/billing/web/backend/.env
 
 [Install]
 WantedBy=multi-user.target
