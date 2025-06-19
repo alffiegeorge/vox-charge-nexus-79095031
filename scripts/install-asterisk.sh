@@ -94,12 +94,173 @@ configure_asterisk() {
     backup_file /etc/asterisk/extconfig.conf
     backup_file /etc/asterisk/modules.conf
 
-    # Copy configuration templates
-    sudo cp "$(dirname "$0")/../config/res_odbc.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/../config/cdr_adaptive_odbc.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/../config/extconfig.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/../config/extensions.conf" /etc/asterisk/
-    sudo cp "$(dirname "$0")/../config/pjsip.conf" /etc/asterisk/
+    # Get the installation directory (should be /opt/billing/web)
+    local install_dir="/opt/billing/web"
+    
+    # Copy configuration templates if they exist, otherwise create them
+    print_status "Setting up Asterisk configuration files..."
+    
+    # res_odbc.conf
+    if [ -f "${install_dir}/config/res_odbc.conf" ]; then
+        sudo cp "${install_dir}/config/res_odbc.conf" /etc/asterisk/
+    else
+        print_status "Creating res_odbc.conf..."
+        sudo tee /etc/asterisk/res_odbc.conf > /dev/null <<EOF
+[asterisk]
+enabled => yes
+dsn => asterisk-connector
+username => asterisk
+password => ASTERISK_DB_PASSWORD_PLACEHOLDER
+pooling => no
+limit => 1
+pre-connect => yes
+sanitysql => select 1
+connect_timeout => 10
+negative_connection_cache => 300
+EOF
+    fi
+
+    # cdr_adaptive_odbc.conf
+    if [ -f "${install_dir}/config/cdr_adaptive_odbc.conf" ]; then
+        sudo cp "${install_dir}/config/cdr_adaptive_odbc.conf" /etc/asterisk/
+    else
+        print_status "Creating cdr_adaptive_odbc.conf..."
+        sudo tee /etc/asterisk/cdr_adaptive_odbc.conf > /dev/null <<EOF
+[asterisk]
+connection=asterisk
+table=cdr
+EOF
+    fi
+
+    # extconfig.conf
+    if [ -f "${install_dir}/config/extconfig.conf" ]; then
+        sudo cp "${install_dir}/config/extconfig.conf" /etc/asterisk/
+    else
+        print_status "Creating extconfig.conf..."
+        sudo tee /etc/asterisk/extconfig.conf > /dev/null <<EOF
+[settings]
+; Map Asterisk objects to database tables for realtime
+
+; PJSIP Realtime Configuration (Asterisk 22)
+ps_endpoints => odbc,asterisk,ps_endpoints
+ps_auths => odbc,asterisk,ps_auths
+ps_aors => odbc,asterisk,ps_aors
+ps_contacts => odbc,asterisk,ps_contacts
+
+; Legacy SIP realtime (for compatibility)
+sipusers => odbc,asterisk,sip_credentials
+sippeers => odbc,asterisk,sip_credentials
+
+; Voicemail realtime
+voicemail => odbc,asterisk,voicemail_users
+
+; Extension realtime (optional - use with caution)
+extensions => odbc,asterisk,extensions
+EOF
+    fi
+
+    # extensions.conf
+    if [ -f "${install_dir}/config/extensions.conf" ]; then
+        sudo cp "${install_dir}/config/extensions.conf" /etc/asterisk/
+    else
+        print_status "Creating extensions.conf..."
+        sudo tee /etc/asterisk/extensions.conf > /dev/null <<EOF
+[general]
+static=yes
+writeprotect=no
+clearglobalvars=no
+
+[globals]
+; Global variables for billing system
+BILLING_API_URL=http://localhost:3001/api
+INTERNAL_CONTEXT=from-internal
+EXTERNAL_CONTEXT=from-external
+
+[from-internal]
+; Internal calls from authenticated SIP endpoints
+; Test extension for PJSIP endpoints
+exten => 100,1,Dial(PJSIP/100)
+exten => 101,1,Dial(PJSIP/101)
+
+; Echo test
+exten => 600,1,Answer()
+exten => 600,n,Echo()
+exten => 600,n,Hangup()
+
+[from-external]
+; External/trunk context
+; DID routing will be added here by the system
+include => from-internal
+EOF
+    fi
+
+    # pjsip.conf
+    if [ -f "${install_dir}/config/pjsip.conf" ]; then
+        sudo cp "${install_dir}/config/pjsip.conf" /etc/asterisk/
+    else
+        print_status "Creating pjsip.conf..."
+        sudo tee /etc/asterisk/pjsip.conf > /dev/null <<EOF
+[global]
+type=global
+endpoint_identifier_order=username,ip
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:5060
+
+; Template for customer endpoints
+[customer-template](!)
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw,alaw,g722,g729
+direct_media=no
+ice_support=yes
+force_rport=yes
+rewrite_contact=yes
+rtp_symmetric=yes
+send_rpid=yes
+send_pai=yes
+trust_id_inbound=yes
+
+; Template for auth objects
+[auth-template](!)
+type=auth
+auth_type=userpass
+
+; Template for AOR objects  
+[aor-template](!)
+type=aor
+max_contacts=1
+remove_existing=yes
+qualify_frequency=60
+
+; Sample endpoint for testing
+[100]
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw,alaw
+aors=100
+auth=100
+
+[100]
+type=auth
+auth_type=userpass
+username=100
+password=test123
+
+[100]
+type=aor
+max_contacts=1
+EOF
+    fi
 
     # Replace password placeholder in configuration files
     sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/asterisk/res_odbc.conf
