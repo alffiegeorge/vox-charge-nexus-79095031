@@ -15,8 +15,11 @@ echo ""
 echo "Available scripts:"
 ls -la scripts/*.sh
 echo ""
-echo "To fix database authentication issues, run:"
-echo "  ./scripts/fix-database-auth.sh"
+echo "To fix realtime authentication issues, run:"
+echo "  ./scripts/fix-realtime-auth.sh <mysql_root_password> <asterisk_db_password>"
+echo ""
+echo "To test realtime functionality, run:"
+echo "  ./scripts/test-realtime-complete.sh <asterisk_db_password>"
 echo ""
 echo "Main installation script:"
 ls -la install.sh

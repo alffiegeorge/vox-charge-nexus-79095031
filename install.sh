@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling installation main script
@@ -73,6 +72,27 @@ main() {
     else
         print_error "Asterisk installation script not found"
         exit 1
+    fi
+    
+    # Fix realtime authentication after Asterisk installation
+    if [ -f "scripts/fix-realtime-auth.sh" ]; then
+        print_status "Fixing realtime authentication..."
+        chmod +x scripts/fix-realtime-auth.sh
+        ./scripts/fix-realtime-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
+        if [ $? -eq 0 ]; then
+            print_status "✓ Realtime authentication fixed successfully"
+        else
+            print_warning "⚠ Realtime authentication fix encountered issues"
+        fi
+    else
+        print_warning "⚠ Realtime authentication fix script not found"
+    fi
+    
+    # Test realtime functionality
+    if [ -f "scripts/test-realtime-complete.sh" ]; then
+        print_status "Testing realtime functionality..."
+        chmod +x scripts/test-realtime-complete.sh
+        ./scripts/test-realtime-complete.sh "$ASTERISK_DB_PASSWORD"
     fi
     
     # Create backend service environment

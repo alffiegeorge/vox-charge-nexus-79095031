@@ -127,6 +127,32 @@ setup_backend_service() {
     fi
 }
 
+fix_realtime_after_web_setup() {
+    print_status "Applying final realtime authentication fixes..."
+    
+    # Get passwords from environment or prompt
+    local mysql_root_password=${MYSQL_ROOT_PASSWORD:-""}
+    local asterisk_db_password=${ASTERISK_DB_PASSWORD:-""}
+    
+    if [ -z "$mysql_root_password" ] || [ -z "$asterisk_db_password" ]; then
+        print_warning "Database passwords not found in environment"
+        print_status "Please run the realtime fix manually:"
+        print_status "sudo ./scripts/fix-realtime-auth.sh <mysql_root_password> <asterisk_db_password>"
+        return 0
+    fi
+    
+    if [ -f "scripts/fix-realtime-auth.sh" ]; then
+        chmod +x scripts/fix-realtime-auth.sh
+        ./scripts/fix-realtime-auth.sh "$mysql_root_password" "$asterisk_db_password"
+        
+        # Test the fix
+        if [ -f "scripts/test-realtime-complete.sh" ]; then
+            chmod +x scripts/test-realtime-complete.sh
+            ./scripts/test-realtime-complete.sh "$asterisk_db_password"
+        fi
+    fi
+}
+
 setup_web_stack() {
     print_status "Starting web stack setup..."
     
@@ -156,8 +182,14 @@ setup_web_stack() {
     
     setup_backend_service
     
+    # Apply realtime fixes at the end
+    fix_realtime_after_web_setup
+    
     print_status "Web stack setup completed successfully"
     print_status "You can now access the application at http://your-server-ip"
+    print_status ""
+    print_status "If you encounter ODBC/realtime issues, run:"
+    print_status "sudo ./scripts/fix-realtime-auth.sh <mysql_root_password> <asterisk_db_password>"
 }
 
 # Execute if run directly
