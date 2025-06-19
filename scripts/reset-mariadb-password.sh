@@ -20,7 +20,6 @@ reset_mariadb_password() {
     
     # Step 1: Identify database version
     print_status "Step 1: Identifying database version..."
-    echo ""
     sleep 1
     
     if command -v mysql >/dev/null 2>&1; then
@@ -32,22 +31,40 @@ reset_mariadb_password() {
     echo ""
     sleep 1
     
-    # Step 2: Stop the database server
+    # Step 2: Stop the database server with improved process control
     print_status "Step 2: Stopping MariaDB server..."
     echo ""
     sleep 1
     
     print_status "Stopping MariaDB service..."
-    sudo systemctl stop mariadb >/dev/null 2>&1 || true
-    sudo systemctl stop mysql >/dev/null 2>&1 || true
+    {
+        sudo systemctl stop mariadb 2>/dev/null
+        sudo systemctl stop mysql 2>/dev/null
+    } >/dev/null 2>&1
     sleep 2
     
-    print_status "Killing remaining MariaDB processes..."
-    sudo pkill -9 -f mysqld >/dev/null 2>&1 || true
-    sudo pkill -9 -f mariadbd >/dev/null 2>&1 || true
+    print_status "Terminating remaining MariaDB processes..."
+    {
+        # Stop processes gracefully first
+        sudo pkill -15 mysqld 2>/dev/null
+        sudo pkill -15 mariadbd 2>/dev/null
+        sleep 3
+        
+        # Force kill if still running
+        sudo pkill -9 mysqld 2>/dev/null
+        sudo pkill -9 mariadbd 2>/dev/null
+        sudo pkill -9 mysqld_safe 2>/dev/null
+    } >/dev/null 2>&1
+    
+    # Wait for processes to actually stop
     sleep 3
     
-    print_status "✓ MariaDB processes stopped"
+    # Verify processes are stopped
+    if pgrep -f "mysqld\|mariadbd" >/dev/null 2>&1; then
+        print_warning "Some MariaDB processes may still be running, continuing anyway..."
+    else
+        print_status "✓ All MariaDB processes stopped"
+    fi
     echo ""
     sleep 1
     
@@ -58,17 +75,22 @@ reset_mariadb_password() {
     
     # Remove any existing socket files
     print_status "Cleaning up socket files..."
-    sudo rm -f /var/run/mysqld/mysqld.sock >/dev/null 2>&1 || true
-    sudo rm -f /tmp/mysql.sock >/dev/null 2>&1 || true
+    {
+        sudo rm -f /var/run/mysqld/mysqld.sock 2>/dev/null
+        sudo rm -f /tmp/mysql.sock 2>/dev/null
+        sudo rm -f /var/lib/mysql/mysql.sock 2>/dev/null
+    } >/dev/null 2>&1
     sleep 1
     
-    # Start MariaDB in safe mode
+    # Start MariaDB in safe mode with complete output suppression
     print_status "Starting mysqld_safe with --skip-grant-tables --skip-networking..."
     echo ""
     sleep 1
     
-    # Redirect all mysqld_safe output to prevent interference
-    sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
+    # Start in background with all output suppressed
+    {
+        sudo mysqld_safe --skip-grant-tables --skip-networking --user=mysql
+    } >/dev/null 2>&1 &
     SAFE_PID=$!
     
     # Wait for the server to start
@@ -104,7 +126,11 @@ reset_mariadb_password() {
         
         # Clean up
         if [ -n "$SAFE_PID" ]; then
-            sudo kill $SAFE_PID >/dev/null 2>&1 || true
+            {
+                sudo kill -15 $SAFE_PID 2>/dev/null
+                sleep 2
+                sudo kill -9 $SAFE_PID 2>/dev/null
+            } >/dev/null 2>&1
         fi
         return 1
     fi
@@ -159,7 +185,11 @@ EOF
                 
                 # Clean up
                 if [ -n "$SAFE_PID" ]; then
-                    sudo kill $SAFE_PID >/dev/null 2>&1 || true
+                    {
+                        sudo kill -15 $SAFE_PID 2>/dev/null
+                        sleep 2
+                        sudo kill -9 $SAFE_PID 2>/dev/null
+                    } >/dev/null 2>&1
                 fi
                 return 1
             fi
@@ -171,33 +201,42 @@ EOF
     echo ""
     sleep 1
     
-    # Stop the safe mode instance
+    # Stop the safe mode instance with improved cleanup
     print_status "Stopping safe mode instance..."
-    if [ -n "$SAFE_PID" ]; then
-        sudo kill $SAFE_PID >/dev/null 2>&1 || true
-    fi
-    sleep 2
+    {
+        if [ -n "$SAFE_PID" ]; then
+            sudo kill -15 $SAFE_PID 2>/dev/null
+            sleep 3
+            sudo kill -9 $SAFE_PID 2>/dev/null
+        fi
+        
+        # Clean up PID files
+        if [ -f /var/run/mysqld/mysqld.pid ]; then
+            sudo kill -15 $(cat /var/run/mysqld/mysqld.pid) 2>/dev/null
+        fi
+        
+        if [ -f /var/run/mariadb/mariadb.pid ]; then
+            sudo kill -15 $(cat /var/run/mariadb/mariadb.pid) 2>/dev/null
+        fi
+        
+        # Final cleanup of all MariaDB processes
+        sudo pkill -15 mysqld_safe 2>/dev/null
+        sudo pkill -15 mysqld 2>/dev/null
+        sudo pkill -15 mariadbd 2>/dev/null
+        sleep 3
+        sudo pkill -9 mysqld_safe 2>/dev/null
+        sudo pkill -9 mysqld 2>/dev/null
+        sudo pkill -9 mariadbd 2>/dev/null
+    } >/dev/null 2>&1
     
-    # Alternative cleanup methods
-    if [ -f /var/run/mysqld/mysqld.pid ]; then
-        sudo kill $(cat /var/run/mysqld/mysqld.pid) >/dev/null 2>&1 || true
-    fi
-    
-    if [ -f /var/run/mariadb/mariadb.pid ]; then
-        sudo kill $(cat /var/run/mariadb/mariadb.pid) >/dev/null 2>&1 || true
-    fi
-    
-    # Ensure all processes are stopped
-    print_status "Ensuring all MariaDB processes are stopped..."
-    sudo pkill -f mysqld_safe >/dev/null 2>&1 || true
-    sudo pkill -f mysqld >/dev/null 2>&1 || true
-    sudo pkill -f mariadbd >/dev/null 2>&1 || true
     sleep 3
     
     # Start MariaDB normally
     print_status "Starting MariaDB service normally..."
     echo ""
-    sudo systemctl start mariadb >/dev/null 2>&1
+    {
+        sudo systemctl start mariadb
+    } >/dev/null 2>&1
     
     # Wait for service to be ready with status checks
     print_status "Waiting for MariaDB service to be ready..."
@@ -262,101 +301,5 @@ EOF
     return 1
 }
 
-# Display usage information
-show_usage() {
-    echo ""
-    echo "Usage: $0 [new_password]"
-    echo ""
-    echo "Reset MariaDB root password when you've lost access"
-    echo ""
-    echo "Examples:"
-    echo "  $0                    # Reset to default password 'admin123'"
-    echo "  $0 mynewpassword      # Reset to custom password"
-    echo ""
-    echo "This script will:"
-    echo "1. Stop MariaDB service"
-    echo "2. Start MariaDB in safe mode (no password required)"
-    echo "3. Reset the root password"
-    echo "4. Restart MariaDB normally"
-    echo "5. Test the new password"
-    echo ""
-}
+# ... keep existing code (show_usage function and main execution block)
 
-# Execute if run directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Check if help requested
-    if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
-        show_usage
-        exit 0
-    fi
-    
-    # Check if running as root
-    if [[ $EUID -eq 0 ]]; then
-        echo ""
-        print_error "Please do not run this script as root"
-        print_status "Run as a regular user with sudo access"
-        echo ""
-        exit 1
-    fi
-    
-    # Check if user has sudo access
-    if ! sudo -n true 2>/dev/null; then
-        echo ""
-        print_error "This script requires sudo access"
-        echo ""
-        exit 1
-    fi
-    
-    # Get new password or use default
-    if [ $# -eq 0 ]; then
-        new_password="admin123"
-        print_status "No password provided, using default: admin123"
-    else
-        new_password="$1"
-    fi
-    
-    # Confirm action
-    echo ""
-    print_warning "WARNING: This will reset the MariaDB root password!"
-    print_status "New password will be: $new_password"
-    echo ""
-    
-    read -p "Continue? (y/N): " -n 1 -r
-    echo ""
-    echo ""
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_status "Operation cancelled"
-        echo ""
-        exit 0
-    fi
-    
-    # Execute password reset
-    if reset_mariadb_password "$new_password"; then
-        echo ""
-        echo "=================================================="
-        print_status "=== PASSWORD RESET COMPLETED ==="
-        echo "=================================================="
-        echo ""
-        print_status "MariaDB root password: $new_password"
-        echo ""
-        print_status "You can now connect with:"
-        print_status "mysql -u root -p"
-        echo ""
-        print_status "Remember to:"
-        print_status "1. Save your new password securely"
-        print_status "2. Update any applications using the old password"
-        print_status "3. Consider running mysql_secure_installation for additional security"
-        echo ""
-    else
-        echo ""
-        echo "=================================================="
-        print_error "=== PASSWORD RESET FAILED ==="
-        echo "=================================================="
-        echo ""
-        print_status "Try running the complete MariaDB reinstall script instead:"
-        print_status "./scripts/complete-mariadb-reinstall.sh"
-        echo ""
-        exit 1
-    fi
-fi
