@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling Bootstrap Script
@@ -355,6 +354,60 @@ else
     fi
 fi
 
+# Setup initial database schema with SIP credentials table
+print_status "Setting up database schema..."
+mysql -u root -p"$MYSQL_ROOT_PASSWORD" asterisk <<EOF
+-- Create customers table if it doesn't exist
+CREATE TABLE IF NOT EXISTS customers (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    address TEXT,
+    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
+    balance DECIMAL(10,2) DEFAULT 0.00,
+    credit_limit DECIMAL(10,2) DEFAULT 0.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Create sip_credentials table for endpoint management
+CREATE TABLE IF NOT EXISTS sip_credentials (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id VARCHAR(50) NOT NULL UNIQUE,
+    sip_username VARCHAR(50) NOT NULL UNIQUE,
+    sip_password VARCHAR(100) NOT NULL,
+    sip_domain VARCHAR(100) NOT NULL,
+    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+-- Create users table for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
+    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Insert default admin user (password: admin123)
+INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
+('admin', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
+EOF
+
+if [ $? -eq 0 ]; then
+    print_status "✓ Database schema created successfully"
+else
+    print_error "Failed to create database schema"
+    exit 1
+fi
+
 # Continue with existing bootstrap code...
 # ... keep existing code (ODBC setup, backend configuration, build, systemd service, nginx setup) the same ...
 
@@ -636,6 +689,7 @@ print_status ""
 print_status "Next steps:"
 print_status "1. Access the web interface at http://$(hostname -I | awk '{print $1}')"
 print_status "2. Login with admin/admin123"
+print_status "3. Create customers and their SIP endpoints from the admin panel"
 print_status ""
 print_status "For troubleshooting, check:"
 print_status "- Backend service: sudo systemctl status ibilling-backend"
