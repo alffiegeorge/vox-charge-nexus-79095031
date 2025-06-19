@@ -1,4 +1,3 @@
-
 -- iBilling Database Schema
 -- CDR Table for Call Detail Records
 CREATE TABLE IF NOT EXISTS cdr (
@@ -126,7 +125,6 @@ CREATE TABLE IF NOT EXISTS voicemail (
     email VARCHAR(40) DEFAULT NULL,
     pager VARCHAR(40) DEFAULT NULL,
     tz VARCHAR(40) DEFAULT 'central',
-    attach VARCHAR(40) DEFAULT 'yes',
     saycid VARCHAR(40) DEFAULT 'yes',
     dialout VARCHAR(40) DEFAULT '',
     callback VARCHAR(40) DEFAULT '',
@@ -159,8 +157,6 @@ CREATE TABLE IF NOT EXISTS customers (
     status ENUM('Active', 'Suspended', 'Closed') NOT NULL DEFAULT 'Active',
     address TEXT DEFAULT NULL,
     notes TEXT DEFAULT NULL,
-    qr_code_enabled BOOLEAN DEFAULT FALSE,
-    qr_code_data TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -395,11 +391,11 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('login_attempt_limit', 'true', 'boolean', 'security', 'Enable login attempt limiting'),
 ('max_login_attempts', '5', 'number', 'security', 'Maximum login attempts before lockout');
 
--- Insert sample data
-INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status, qr_code_enabled) VALUES
-('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active', TRUE),
-('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active', TRUE),
-('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended', FALSE);
+-- Insert sample data without qr_code_enabled column
+INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status) VALUES
+('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active'),
+('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active'),
+('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'Prepaid', 0.00, 'Suspended');
 
 INSERT IGNORE INTO rates (destination_prefix, destination_name, rate_per_minute, billing_increment) VALUES
 ('1', 'USA/Canada', 0.0120, 60),

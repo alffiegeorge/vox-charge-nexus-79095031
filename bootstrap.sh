@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # iBilling Bootstrap Script
@@ -203,7 +202,7 @@ else
     fi
 fi
 
-# Setup initial database schema with SIP credentials table
+# Setup initial database schema with simpler table structure
 print_status "Setting up database schema..."
 mysql -u root -p"$MYSQL_ROOT_PASSWORD" asterisk <<EOF
 -- Create customers table if it doesn't exist
@@ -380,6 +379,12 @@ CREATE TABLE IF NOT EXISTS users (
 -- Insert default admin user (password: admin123)
 INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
 ('admin', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
+
+-- Insert simple customer data without problematic columns
+INSERT IGNORE INTO customers (id, name, email, phone, status, balance) VALUES
+('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'active', 125.50),
+('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'active', -45.20),
+('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'suspended', 0.00);
 EOF
 
 if [ $? -eq 0 ]; then
