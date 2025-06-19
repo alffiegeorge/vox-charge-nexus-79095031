@@ -124,7 +124,7 @@ if [ ${#failed_downloads[@]} -gt 0 ]; then
 fi
 
 # Create a simplified install.sh that uses existing scripts
-print_status "Creating simplified installation script..."
+print_status "Creating installation script..."
 cat > install.sh << 'EOF'
 #!/bin/bash
 
@@ -191,7 +191,7 @@ main() {
     sudo mkdir -p /opt/billing
     
     # Generate JWT secret
-    local jwt_secret=$(openssl rand -base64 32)
+    jwt_secret=$(openssl rand -base64 32)
     
     # Create environment file
     sudo tee /opt/billing/.env > /dev/null <<EOL
@@ -244,11 +244,6 @@ EOL
     sudo systemctl daemon-reload
     
     print_status "iBilling installation completed successfully!"
-    print_status ""
-    print_status "Next steps:"
-    print_status "1. Set up the web frontend with: scripts/setup-web.sh"
-    print_status "2. Configure your first customer endpoints"
-    print_status "3. Test the installation with the verification commands"
 }
 
 # Execute if run directly
@@ -276,7 +271,7 @@ fi
 if [ $? -eq 0 ]; then
     print_status "iBilling installation completed successfully!"
     
-    # Setup web components
+    # Setup web components manually since setup-web.sh has issues
     print_status "Setting up web frontend and Node.js..."
     
     # Create necessary directories
@@ -290,81 +285,86 @@ if [ $? -eq 0 ]; then
         sudo apt install -y nodejs
     fi
     
-    # Setup backend if scripts are available
-    if [ -f "scripts/setup-web.sh" ]; then
-        print_status "Running web setup script..."
-        sudo chmod +x scripts/setup-web.sh
-        sudo ./scripts/setup-web.sh
+    # Manual web setup instead of using problematic script
+    print_status "Setting up iBilling frontend manually..."
+    
+    # Create web directory if it doesn't exist
+    sudo mkdir -p /opt/billing/web
+    cd /opt/billing/web
+
+    # Remove existing files if any
+    sudo rm -rf ./* 2>/dev/null || true
+    sudo rm -rf ./.* 2>/dev/null || true
+
+    # Clone the repository
+    print_status "Cloning repository..."
+    if sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git .; then
+        print_status "Repository cloned successfully"
     else
-        print_status "Setting up basic web environment..."
-        
-        # Setup basic Nginx configuration
-        sudo apt install -y nginx
-        
-        # Create a basic index.html
-        sudo tee /var/www/html/index.html > /dev/null <<'HTML'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>iBilling System</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .status { padding: 20px; background: #f0f0f0; border-radius: 5px; margin: 20px 0; }
-        .success { background: #d4edda; color: #155724; }
-        .warning { background: #fff3cd; color: #856404; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>iBilling System - Installation Complete</h1>
-        <div class="status success">
-            <h3>✓ System Status</h3>
-            <p>The iBilling system has been successfully installed with Asterisk 22 and ODBC support.</p>
-        </div>
-        
-        <div class="status warning">
-            <h3>⚠ Next Steps Required</h3>
-            <ul>
-                <li>Configure backend settings in <code>/opt/billing/backend/.env</code></li>
-                <li>Install and configure the React frontend</li>
-                <li>Start the backend service: <code>sudo systemctl start ibilling-backend</code></li>
-            </ul>
-        </div>
-        
-        <div class="status">
-            <h3>System Information</h3>
-            <p><strong>MySQL Root Password:</strong> Please check installation logs</p>
-            <p><strong>Asterisk DB Password:</strong> Please check installation logs</p>
-            <p><strong>Asterisk Status:</strong> <code>sudo systemctl status asterisk</code></p>
-            <p><strong>ODBC Status:</strong> <code>sudo asterisk -rx 'odbc show all'</code></p>
-        </div>
-        
-        <div class="status">
-            <h3>Manual Frontend Setup</h3>
-            <p>To complete the React frontend setup, run:</p>
-            <pre>
-cd /opt/billing/web
-sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git .
-sudo chown -R $USER:$USER /opt/billing/web
-npm install
-npm run build
-            </pre>
-        </div>
-    </div>
-</body>
-</html>
-HTML
-        
-        # Start and enable Nginx
+        print_error "Failed to clone repository"
+        exit 1
+    fi
+
+    # Set permissions for the current user
+    current_user=$(whoami)
+    sudo chown -R "$current_user:$current_user" /opt/billing/web
+
+    # Install npm dependencies
+    print_status "Installing npm dependencies..."
+    if npm install; then
+        print_status "Dependencies installed successfully"
+    else
+        print_error "Failed to install dependencies"
+        exit 1
+    fi
+
+    # Build the project
+    print_status "Building the project..."
+    if npm run build; then
+        print_status "Project built successfully"
+    else
+        print_error "Failed to build project"
+        exit 1
+    fi
+    
+    # Setup Nginx
+    print_status "Configuring Nginx..."
+    
+    # Install Nginx if not present
+    sudo apt update
+    sudo apt install -y nginx
+    
+    # Clean existing Nginx configurations
+    print_status "Cleaning existing Nginx configurations..."
+    sudo rm -f /etc/nginx/sites-enabled/default
+    sudo rm -f /etc/nginx/sites-enabled/ibilling
+    sudo rm -f /etc/nginx/sites-available/ibilling
+    
+    # Copy Nginx configuration from the downloaded files
+    if [ -f "config/nginx-ibilling.conf" ]; then
+        sudo cp "config/nginx-ibilling.conf" /etc/nginx/sites-available/ibilling
+        print_status "Nginx configuration copied"
+    else
+        print_error "Nginx configuration file not found"
+        exit 1
+    fi
+
+    # Enable the site
+    sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
+
+    # Test and reload Nginx
+    if sudo nginx -t; then
+        print_status "Nginx configuration test passed"
         sudo systemctl enable nginx
-        sudo systemctl start nginx
-        
-        print_status "Basic web server configured at http://your-server-ip"
+        sudo systemctl reload nginx
+        print_status "Nginx reloaded successfully"
+    else
+        print_error "Nginx configuration test failed"
+        exit 1
     fi
     
     print_status ""
-    print_status "=== IMPORTANT INFORMATION ==="
+    print_status "=== INSTALLATION COMPLETED SUCCESSFULLY ==="
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
         print_status "MySQL root password: $MYSQL_ROOT_PASSWORD"
     fi
@@ -372,14 +372,8 @@ HTML
     print_status "Please save these passwords securely!"
     print_status ""
     print_status "Next steps:"
-    print_status "1. Configure your backend settings in /opt/billing/backend/.env"
-    print_status "2. Complete frontend setup if not automated:"
-    print_status "   cd /opt/billing/web"
-    print_status "   sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git ."
-    print_status "   sudo chown -R \$USER:\$USER /opt/billing/web"
-    print_status "   npm install && npm run build"
-    print_status "3. Start the backend service: sudo systemctl start ibilling-backend"
-    print_status "4. Access the web interface at http://your-server-ip"
+    print_status "1. Start the backend service: sudo systemctl start ibilling-backend"
+    print_status "2. Access the web interface at http://your-server-ip"
     print_status ""
     print_status "For troubleshooting, check:"
     print_status "- Asterisk status: sudo systemctl status asterisk"
