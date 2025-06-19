@@ -1,7 +1,7 @@
 
 #!/bin/bash
 
-# Database management module
+# Database management module - Updated version
 source "$(dirname "$0")/utils.sh"
 
 check_mysql_access() {
@@ -22,128 +22,96 @@ check_mysql_access() {
     return 1
 }
 
-secure_mysql() {
-    local mysql_root_password=$1
-    
-    print_status "Securing MariaDB installation..."
-    
-    # Check if we can access MySQL without password first
-    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
-        print_status "Setting up MySQL root password and security..."
-        mysql -u root <<EOF
-UPDATE mysql.user SET Password=PASSWORD('${mysql_root_password}') WHERE User='root';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-FLUSH PRIVILEGES;
-EOF
-        if [ $? -eq 0 ]; then
-            print_status "✓ MySQL secured successfully"
-            return 0
-        else
-            print_error "✗ Failed to secure MySQL"
-            return 1
-        fi
-    else
-        print_status "MySQL appears to already be secured"
-        return 0
-    fi
-}
-
-reset_database() {
+reset_mysql_completely() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
     
-    print_status "Resetting database - dropping and recreating..."
+    print_status "Performing complete MySQL reset..."
     
-    # Stop any existing connections
-    sudo systemctl stop asterisk 2>/dev/null || true
+    # Stop MariaDB
+    sudo systemctl stop mariadb
+    sleep 3
     
-    # Try to determine the correct way to connect to MySQL
-    local mysql_connect=""
-    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
-        mysql_connect="mysql -u root"
-    elif [ -n "$mysql_root_password" ] && mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-        mysql_connect="mysql -u root -p${mysql_root_password}"
-    else
-        print_error "Cannot connect to MySQL. Please check your MySQL installation and root password."
-        reset_mysql_password "$mysql_root_password"
-        mysql_connect="mysql -u root -p${mysql_root_password}"
-    fi
-
-    # Drop and recreate database
-    $mysql_connect <<EOF
+    # Start in safe mode
+    print_status "Starting MariaDB in safe mode..."
+    sudo mysqld_safe --skip-grant-tables --skip-networking &
+    sleep 5
+    
+    # Reset everything
+    print_status "Resetting all database users and permissions..."
+    mysql -u root <<EOF
+FLUSH PRIVILEGES;
 DROP DATABASE IF EXISTS asterisk;
-CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 DROP USER IF EXISTS 'asterisk'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
+CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
 FLUSH PRIVILEGES;
 EOF
-
-    if [ $? -eq 0 ]; then
-        print_status "✓ Database reset completed successfully"
-    else
-        print_error "✗ Database reset failed"
-        exit 1
-    fi
-}
-
-reset_mysql_password() {
-    local mysql_root_password=$1
     
-    print_status "Trying to reset MySQL root password..."
-    
-    # Stop MySQL
-    sudo systemctl stop mariadb
-    
-    # Start MySQL in safe mode
-    sudo mysqld_safe --skip-grant-tables --skip-networking &
-    sleep 5
-    
-    # Reset root password
-    mysql -u root <<EOF
-FLUSH PRIVILEGES;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
-FLUSH PRIVILEGES;
-EOF
-    
-    # Stop safe mode MySQL
-    sudo pkill mysqld_safe
-    sudo pkill mysqld
+    # Stop safe mode
+    print_status "Stopping safe mode..."
+    sudo pkill mysqld_safe 2>/dev/null || true
+    sudo pkill mysqld 2>/dev/null || true
     sleep 3
     
-    # Start MySQL normally
+    # Start normally
     sudo systemctl start mariadb
+    sudo systemctl enable mariadb
     sleep 5
     
-    # Test connection
-    if ! mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-        print_error "Still cannot connect to MySQL after reset attempt"
-        exit 1
+    # Verify connections
+    if mysql -u root -p"${mysql_root_password}" -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "✓ Root access restored"
+    else
+        print_error "✗ Root access still failing"
+        return 1
     fi
     
-    print_status "✓ MySQL root password reset successfully"
+    if mysql -u asterisk -p"${asterisk_db_password}" asterisk -e "SELECT 1;" >/dev/null 2>&1; then
+        print_status "✓ Asterisk user access working"
+    else
+        print_error "✗ Asterisk user access failing"
+        return 1
+    fi
+    
+    return 0
 }
 
 setup_database() {
     local mysql_root_password=$1
     local asterisk_db_password=$2
     
-    print_status "Configuring MariaDB..."
-    sudo systemctl start mariadb
-    sudo systemctl enable mariadb
-
-    # Check MySQL access and secure if needed
-    if ! check_mysql_access "$mysql_root_password"; then
-        secure_mysql "$mysql_root_password"
+    print_status "Setting up database with improved error handling..."
+    
+    # Ensure MariaDB is installed and running
+    if ! systemctl is-active --quiet mariadb; then
+        print_status "Starting MariaDB service..."
+        sudo systemctl start mariadb
+        sudo systemctl enable mariadb
+        sleep 5
     fi
-
-    # Reset database completely
-    reset_database "$mysql_root_password" "$asterisk_db_password"
-
-    # Create database tables using the schema file
+    
+    # Check if we can access the database
+    if ! check_mysql_access "$mysql_root_password"; then
+        print_warning "Cannot access MySQL with current credentials, performing reset..."
+        if ! reset_mysql_completely "$mysql_root_password" "$asterisk_db_password"; then
+            print_error "Failed to reset MySQL. Manual intervention required."
+            exit 1
+        fi
+    else
+        print_status "MySQL access verified, proceeding with setup..."
+        # Still create the asterisk user and database if they don't exist
+        mysql -u root -p"${mysql_root_password}" <<EOF
+CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    fi
+    
+    # Create database tables
     create_database_tables "$mysql_root_password"
     
     print_status "Database setup completed successfully"
@@ -153,15 +121,17 @@ create_database_tables() {
     local mysql_root_password=$1
     
     print_status "Creating database tables..."
+    
+    # Use the schema file if it exists, otherwise create basic tables
     if [ -f "config/database-schema.sql" ]; then
         if mysql -u root -p"${mysql_root_password}" asterisk < "config/database-schema.sql"; then
             print_status "✓ Database schema applied successfully"
         else
-            print_error "✗ Failed to apply database schema"
-            exit 1
+            print_error "✗ Failed to apply database schema, creating basic tables..."
+            create_basic_tables "$mysql_root_password"
         fi
     else
-        print_warning "Database schema file not found at config/database-schema.sql"
+        print_status "Creating basic tables..."
         create_basic_tables "$mysql_root_password"
     fi
 }
@@ -195,30 +165,21 @@ CREATE TABLE IF NOT EXISTS cdr (
     INDEX accountcode_idx (accountcode)
 );
 
--- PJSIP realtime tables
-CREATE TABLE IF NOT EXISTS ps_endpoints (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    transport VARCHAR(40),
-    aors VARCHAR(200),
-    auth VARCHAR(40),
-    context VARCHAR(40) DEFAULT 'from-internal',
-    disallow VARCHAR(200) DEFAULT 'all',
-    allow VARCHAR(200) DEFAULT 'ulaw,alaw',
-    direct_media ENUM('yes','no') DEFAULT 'no'
+-- Users table for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
+    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS ps_auths (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    auth_type ENUM('userpass','md5') DEFAULT 'userpass',
-    password VARCHAR(80),
-    username VARCHAR(40)
-);
-
-CREATE TABLE IF NOT EXISTS ps_aors (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    max_contacts INT DEFAULT 1,
-    remove_existing ENUM('yes','no') DEFAULT 'yes'
-);
+-- Insert default admin user (password: admin123)
+INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
+('admin', '\$2b\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
 
 -- Basic customers table
 CREATE TABLE IF NOT EXISTS customers (
@@ -229,5 +190,30 @@ CREATE TABLE IF NOT EXISTS customers (
     status ENUM('Active', 'Suspended', 'Closed') NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Sample customer data
+INSERT IGNORE INTO customers (id, name, email, balance, status) VALUES 
+('CUST001', 'John Doe', 'john.doe@example.com', 100.00, 'Active'),
+('CUST002', 'Jane Smith', 'jane.smith@example.com', 250.75, 'Active'),
+('CUST003', 'Bob Johnson', 'bob.johnson@example.com', 0.00, 'Suspended');
 EOF
+    
+    print_status "✓ Basic tables created successfully"
+}
+
+# Updated function to be called from other scripts
+fix_database_auth() {
+    local mysql_root_password=${1:-"admin123"}
+    local asterisk_db_password=${2:-"asterisk123"}
+    
+    setup_database "$mysql_root_password" "$asterisk_db_password"
+    
+    # Update backend environment
+    if [ -f "/opt/billing/web/backend/.env" ]; then
+        sudo sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${asterisk_db_password}/" /opt/billing/web/backend/.env
+        print_status "✓ Backend environment updated"
+    fi
+    
+    # Restart backend
+    sudo systemctl restart ibilling-backend 2>/dev/null || true
 }

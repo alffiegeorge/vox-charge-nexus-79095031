@@ -15,5 +15,8 @@ echo ""
 echo "Available scripts:"
 ls -la scripts/*.sh
 echo ""
+echo "To fix database authentication issues, run:"
+echo "  ./scripts/fix-database-auth.sh"
+echo ""
 echo "Main installation script:"
 ls -la install.sh
