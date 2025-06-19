@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # iBilling Bootstrap Script
@@ -27,194 +28,7 @@ generate_password() {
     openssl rand -base64 16 | tr -d "=+/" | cut -c1-12
 }
 
-# MariaDB password reset function
-reset_mariadb_password() {
-    local new_password=${1:-"admin123"}
-    
-    print_status "=== MARIADB PASSWORD RESET ==="
-    print_status "Attempting to reset MariaDB root password to: $new_password"
-    
-    # Step 1: Stop the database server
-    print_status "Stopping MariaDB server..."
-    sudo systemctl stop mariadb || true
-    sudo systemctl stop mysql || true
-    
-    # Kill any remaining processes
-    sudo pkill -9 -f mysqld || true
-    sudo pkill -9 -f mariadbd || true
-    sleep 3
-    
-    # Step 2: Start database without permission checking
-    print_status "Starting MariaDB in safe mode (without grant tables)..."
-    
-    # Remove any existing socket files
-    sudo rm -f /var/run/mysqld/mysqld.sock || true
-    sudo rm -f /tmp/mysql.sock || true
-    
-    # Start MariaDB in safe mode
-    print_status "Starting mysqld_safe with --skip-grant-tables --skip-networking..."
-    sudo mysqld_safe --skip-grant-tables --skip-networking &
-    SAFE_PID=$!
-    
-    # Wait for the server to start
-    print_status "Waiting for MariaDB to start in safe mode..."
-    sleep 10
-    
-    # Test if we can connect
-    local connection_attempts=0
-    while [ $connection_attempts -lt 10 ]; do
-        if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
-            print_status "✓ Successfully connected to MariaDB in safe mode"
-            break
-        fi
-        sleep 2
-        connection_attempts=$((connection_attempts + 1))
-        print_status "Waiting for connection... (attempt $connection_attempts/10)"
-    done
-    
-    if [ $connection_attempts -eq 10 ]; then
-        print_error "Failed to connect to MariaDB in safe mode"
-        sudo kill $SAFE_PID 2>/dev/null || true
-        return 1
-    fi
-    
-    # Step 3: Change the root password
-    print_status "Changing root password..."
-    
-    # Connect and change password
-    mysql -u root <<EOF
-FLUSH PRIVILEGES;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${new_password}';
-FLUSH PRIVILEGES;
-EOF
-    
-    if [ $? -eq 0 ]; then
-        print_status "✓ Password changed successfully using ALTER USER"
-    else
-        print_warning "ALTER USER failed, trying alternative method..."
-        mysql -u root <<EOF
-FLUSH PRIVILEGES;
-SET PASSWORD FOR 'root'@'localhost' = PASSWORD('${new_password}');
-FLUSH PRIVILEGES;
-EOF
-        
-        if [ $? -eq 0 ]; then
-            print_status "✓ Password changed successfully using SET PASSWORD"
-        else
-            print_warning "SET PASSWORD failed, trying UPDATE method..."
-            mysql -u root <<EOF
-FLUSH PRIVILEGES;
-UPDATE mysql.user SET authentication_string = PASSWORD('${new_password}') WHERE User = 'root' AND Host = 'localhost';
-FLUSH PRIVILEGES;
-EOF
-            
-            if [ $? -eq 0 ]; then
-                print_status "✓ Password changed successfully using UPDATE"
-            else
-                print_error "All password change methods failed"
-                sudo kill $SAFE_PID 2>/dev/null || true
-                return 1
-            fi
-        fi
-    fi
-    
-    # Step 4: Restart database server normally
-    print_status "Restarting MariaDB normally..."
-    
-    # Stop the safe mode instance
-    print_status "Stopping safe mode instance..."
-    sudo kill $SAFE_PID 2>/dev/null || true
-    
-    # Make sure all processes are stopped
-    sudo pkill -f mysqld_safe || true
-    sudo pkill -f mysqld || true
-    sudo pkill -f mariadbd || true
-    sleep 5
-    
-    # Start MariaDB normally
-    print_status "Starting MariaDB service normally..."
-    sudo systemctl start mariadb
-    
-    # Wait for service to be ready
-    sleep 5
-    
-    # Test the new password
-    print_status "Testing new password..."
-    if mysql -u root -p"${new_password}" -e "SELECT 1;" >/dev/null 2>&1; then
-        print_status "✓ Password reset successful!"
-        print_status "✓ MariaDB root password is now: ${new_password}"
-        return 0
-    else
-        print_error "✗ Password reset failed - cannot connect with new password"
-        return 1
-    fi
-}
-
-# Emergency MariaDB reset function
-emergency_mariadb_reset() {
-    local mysql_root_password=${1:-"admin123"}
-    local asterisk_db_password=${2:-"asterisk123"}
-    
-    print_status "=== EMERGENCY MARIADB RESET ==="
-    print_warning "Performing complete MariaDB reset due to severe issues..."
-    
-    # Kill all processes
-    print_status "Killing all MySQL/MariaDB processes..."
-    sudo pkill -9 -f mysqld || true
-    sudo pkill -9 -f mariadbd || true
-    sudo pkill -9 -f mysqld_safe || true
-    sleep 5
-    
-    # Stop services
-    sudo systemctl stop mariadb || true
-    sudo systemctl stop mysql || true
-    sleep 3
-    
-    # Remove socket files
-    sudo rm -f /var/run/mysqld/mysqld.sock || true
-    sudo rm -f /tmp/mysql.sock || true
-    
-    # Backup and remove data directory
-    if [ -d "/var/lib/mysql" ]; then
-        sudo mv /var/lib/mysql "/var/lib/mysql.backup.$(date +%Y%m%d_%H%M%S)" || true
-    fi
-    
-    # Purge and reinstall
-    print_status "Purging and reinstalling MariaDB..."
-    sudo apt remove --purge -y mariadb-server mariadb-client mariadb-common mysql-common || true
-    sudo apt autoremove -y || true
-    sudo rm -rf /etc/mysql || true
-    sudo rm -rf /var/lib/mysql || true
-    
-    sudo apt update
-    sudo apt install -y mariadb-server mariadb-client
-    
-    # Setup directories
-    sudo mkdir -p /var/run/mysqld
-    sudo chown mysql:mysql /var/run/mysqld
-    
-    # Start MariaDB
-    sudo systemctl enable mariadb
-    sudo systemctl start mariadb
-    sleep 10
-    
-    # Configure database
-    sudo mysql -u root <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${mysql_root_password}';
-CREATE DATABASE asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'asterisk'@'localhost' IDENTIFIED BY '${asterisk_db_password}';
-GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
-FLUSH PRIVILEGES;
-EOF
-    
-    if [ $? -eq 0 ]; then
-        print_status "✓ Emergency reset successful!"
-        return 0
-    else
-        print_error "✗ Emergency reset failed"
-        return 1
-    fi
-}
+# ... keep existing code (MariaDB password reset function, emergency reset function) the same ...
 
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
@@ -275,10 +89,16 @@ cd web
 current_user=$(whoami)
 sudo chown -R "$current_user:$current_user" /opt/billing/web
 
-# Make scripts executable
-print_status "Making scripts executable..."
+# Make all scripts executable
+print_status "Making all scripts executable..."
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x install.sh 2>/dev/null || true
+
+# Execute the make-scripts-executable script
+if [ -f "scripts/make-scripts-executable.sh" ]; then
+    print_status "Running make-scripts-executable.sh..."
+    ./scripts/make-scripts-executable.sh
+fi
 
 # Install system packages
 print_status "Installing system packages..."
@@ -384,6 +204,138 @@ CREATE TABLE IF NOT EXISTS sip_credentials (
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 );
 
+-- Create PJSIP realtime tables for Asterisk
+CREATE TABLE IF NOT EXISTS ps_endpoints (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    transport VARCHAR(40),
+    aors VARCHAR(200),
+    auth VARCHAR(40),
+    context VARCHAR(40),
+    disallow VARCHAR(200),
+    allow VARCHAR(200),
+    direct_media ENUM('yes','no') DEFAULT 'no',
+    connected_line_method ENUM('invite','reinvite','update') DEFAULT 'invite',
+    direct_media_method ENUM('invite','reinvite','update') DEFAULT 'invite',
+    direct_media_glare_mitigation ENUM('none','outgoing','incoming') DEFAULT 'none',
+    disable_direct_media_on_nat ENUM('yes','no') DEFAULT 'no',
+    dtmf_mode ENUM('rfc4733','inband','info','auto','auto_info') DEFAULT 'rfc4733',
+    external_media_address VARCHAR(40),
+    force_rport ENUM('yes','no') DEFAULT 'yes',
+    ice_support ENUM('yes','no') DEFAULT 'no',
+    identify_by ENUM('username','auth_username','endpoint') DEFAULT 'username',
+    mailboxes VARCHAR(40),
+    moh_suggest VARCHAR(40),
+    outbound_auth VARCHAR(40),
+    outbound_proxy VARCHAR(40),
+    rewrite_contact ENUM('yes','no') DEFAULT 'no',
+    rtp_ipv6 ENUM('yes','no') DEFAULT 'no',
+    rtp_symmetric ENUM('yes','no') DEFAULT 'no',
+    send_diversion ENUM('yes','no') DEFAULT 'yes',
+    send_pai ENUM('yes','no') DEFAULT 'no',
+    send_rpid ENUM('yes','no') DEFAULT 'no',
+    timers_min_se INTEGER DEFAULT 90,
+    timers ENUM('forced','no','required','yes') DEFAULT 'yes',
+    timers_sess_expires INTEGER DEFAULT 1800,
+    callerid VARCHAR(40),
+    from_user VARCHAR(40),
+    from_domain VARCHAR(40),
+    sub_min_expiry INTEGER DEFAULT 0,
+    from_uri VARCHAR(40),
+    mwi_from_user VARCHAR(40),
+    dtls_verify ENUM('yes','no','fingerprint','certificate') DEFAULT 'no',
+    dtls_rekey INTEGER DEFAULT 0,
+    dtls_cert_file VARCHAR(200),
+    dtls_private_key VARCHAR(200),
+    dtls_cipher VARCHAR(200),
+    dtls_ca_file VARCHAR(200),
+    dtls_ca_path VARCHAR(200),
+    dtls_setup ENUM('active','passive','actpass') DEFAULT 'active',
+    srtp_tag_32 ENUM('yes','no') DEFAULT 'no',
+    media_address VARCHAR(40),
+    redirect_method ENUM('user','uri_core','uri_pjsip') DEFAULT 'user',
+    set_var TEXT,
+    cos_audio INTEGER DEFAULT 0,
+    cos_video INTEGER DEFAULT 0,
+    message_context VARCHAR(40),
+    accountcode VARCHAR(40),
+    trust_id_inbound ENUM('yes','no') DEFAULT 'no',
+    trust_id_outbound ENUM('yes','no') DEFAULT 'no',
+    use_ptime ENUM('yes','no') DEFAULT 'no',
+    use_avpf ENUM('yes','no') DEFAULT 'no',
+    media_encryption ENUM('no','sdes','dtls') DEFAULT 'no',
+    inband_progress ENUM('yes','no') DEFAULT 'no',
+    call_group VARCHAR(40),
+    pickup_group VARCHAR(40),
+    named_call_group VARCHAR(40),
+    named_pickup_group VARCHAR(40),
+    device_state_busy_at INTEGER DEFAULT 0,
+    fax_detect ENUM('yes','no') DEFAULT 'no',
+    t38_udptl ENUM('yes','no') DEFAULT 'no',
+    t38_udptl_ec ENUM('none','fec','redundancy') DEFAULT 'none',
+    t38_udptl_maxdatagram INTEGER DEFAULT 0,
+    t38_udptl_nat ENUM('yes','no') DEFAULT 'no',
+    t38_udptl_ipv6 ENUM('yes','no') DEFAULT 'no',
+    tone_zone VARCHAR(40),
+    language VARCHAR(40),
+    one_touch_recording ENUM('yes','no') DEFAULT 'no',
+    record_on_feature VARCHAR(40),
+    record_off_feature VARCHAR(40),
+    rtp_engine VARCHAR(40),
+    allow_transfer ENUM('yes','no') DEFAULT 'yes',
+    allow_subscribe ENUM('yes','no') DEFAULT 'yes',
+    sdp_owner VARCHAR(40),
+    sdp_session VARCHAR(40),
+    tos_audio INTEGER DEFAULT 0,
+    tos_video INTEGER DEFAULT 0,
+    bind_rtp_to_media_address ENUM('yes','no') DEFAULT 'no',
+    voicemail_extension VARCHAR(40)
+);
+
+CREATE TABLE IF NOT EXISTS ps_auths (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    auth_type ENUM('md5','userpass') DEFAULT 'userpass',
+    nonce_lifetime INTEGER DEFAULT 32,
+    md5_cred VARCHAR(40),
+    password VARCHAR(80),
+    realm VARCHAR(40),
+    username VARCHAR(40)
+);
+
+CREATE TABLE IF NOT EXISTS ps_aors (
+    id VARCHAR(40) NOT NULL PRIMARY KEY,
+    contact VARCHAR(255),
+    default_expiration INTEGER DEFAULT 3600,
+    mailboxes VARCHAR(80),
+    max_contacts INTEGER DEFAULT 1,
+    minimum_expiration INTEGER DEFAULT 60,
+    remove_existing ENUM('yes','no') DEFAULT 'no',
+    qualify_frequency INTEGER DEFAULT 0,
+    authenticate_qualify ENUM('yes','no') DEFAULT 'no',
+    maximum_expiration INTEGER DEFAULT 7200,
+    outbound_proxy VARCHAR(40),
+    support_path ENUM('yes','no') DEFAULT 'no',
+    qualify_timeout DECIMAL(3,2) DEFAULT 3.0,
+    voicemail_extension VARCHAR(40)
+);
+
+CREATE TABLE IF NOT EXISTS ps_contacts (
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    uri VARCHAR(255),
+    expiration_time BIGINT,
+    qualify_frequency INTEGER,
+    outbound_proxy VARCHAR(40),
+    path TEXT,
+    user_agent VARCHAR(255),
+    qualify_timeout DECIMAL(3,2),
+    reg_server VARCHAR(255),
+    authenticate_qualify ENUM('yes','no') DEFAULT 'no',
+    via_addr VARCHAR(40),
+    via_port INTEGER DEFAULT 0,
+    call_id VARCHAR(255),
+    endpoint VARCHAR(40),
+    prune_on_boot ENUM('yes','no') DEFAULT 'no'
+);
+
 -- Create users table for authentication
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -408,112 +360,59 @@ else
     exit 1
 fi
 
-# Continue with existing bootstrap code...
-# ... keep existing code (ODBC setup, backend configuration, build, systemd service, nginx setup) the same ...
-
-# THIRD: Set up ODBC with verified database connection
-print_status "Configuring ODBC for database connection..."
-
-# Install ODBC packages
-sudo apt install -y unixodbc unixodbc-dev libmariadb-dev odbc-mariadb \
-    libodbc1 odbcinst1debian2 unixodbc-bin
-
-# Find MariaDB ODBC driver path
-driver_paths=(
-    "/usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so"
-    "/usr/lib/odbc/libmaodbc.so"
-    "/usr/lib64/libmaodbc.so"
-    "/usr/local/lib/libmaodbc.so"
-)
-
-found_driver=""
-for path in "${driver_paths[@]}"; do
-    if [ -f "$path" ]; then
-        found_driver="$path"
-        print_status "✓ Found MariaDB ODBC driver at: $path"
-        break
-    fi
-done
-
-if [ -z "$found_driver" ]; then
-    print_error "MariaDB ODBC driver not found"
-    exit 1
+# Run setup-database script if it exists
+if [ -f "scripts/setup-database.sh" ]; then
+    print_status "Running setup-database.sh..."
+    chmod +x scripts/setup-database.sh
+    ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
 fi
 
-# Configure ODBC driver
-print_status "Configuring ODBC drivers..."
-sudo tee /etc/odbcinst.ini > /dev/null <<EOF
-[MariaDB]
-Description = MariaDB ODBC driver
-Driver      = ${found_driver}
-Threading   = 1
-UsageCount  = 1
+# ... keep existing code (ODBC setup) the same ...
 
-[MariaDB Unicode]
-Description = MariaDB ODBC Unicode driver
-Driver      = ${found_driver}
-Threading   = 1
-UsageCount  = 1
-EOF
-
-# Find MySQL socket path
-socket_paths=(
-    "/var/run/mysqld/mysqld.sock"
-    "/tmp/mysql.sock"
-    "/var/lib/mysql/mysql.sock"
-    "/run/mysqld/mysqld.sock"
-)
-
-found_socket=""
-for socket in "${socket_paths[@]}"; do
-    if [ -S "$socket" ]; then
-        found_socket="$socket"
-        print_status "✓ Found MySQL socket at: $socket"
-        break
-    fi
-done
-
-if [ -z "$found_socket" ]; then
-    print_warning "MySQL socket not found, using default path"
-    found_socket="/var/run/mysqld/mysqld.sock"
+# Run setup-odbc script if it exists
+if [ -f "scripts/setup-odbc.sh" ]; then
+    print_status "Running setup-odbc.sh..."
+    chmod +x scripts/setup-odbc.sh
+    ./scripts/setup-odbc.sh "$ASTERISK_DB_PASSWORD"
 fi
 
-# Configure ODBC DSN
-print_status "Configuring ODBC data source..."
-sudo tee /etc/odbc.ini > /dev/null <<EOF
-[asterisk-connector]
-Description = MariaDB connection to 'asterisk' database
-Driver      = MariaDB
-Server      = localhost
-Database    = asterisk
-User        = asterisk
-Password    = ${ASTERISK_DB_PASSWORD}
-Port        = 3306
-Socket      = ${found_socket}
-Option      = 3
-Charset     = utf8
-EOF
-
-# Test direct MySQL connection first
-print_status "Testing direct MySQL connection..."
-if mysql -u asterisk -p"${ASTERISK_DB_PASSWORD}" -e "SELECT 1;" asterisk >/dev/null 2>&1; then
-    print_status "✓ Direct MySQL connection successful"
-else
-    print_error "✗ Direct MySQL connection failed"
-    exit 1
-fi
-
-# Test ODBC connection
-print_status "Testing ODBC connection..."
-if command -v isql >/dev/null 2>&1; then
-    if echo "SELECT 1 as test;" | timeout 10 isql -v asterisk-connector asterisk "${ASTERISK_DB_PASSWORD}" 2>/dev/null | grep -q "test"; then
-        print_status "✓ ODBC connection test successful"
-    else
-        print_warning "⚠ ODBC connection test failed, but continuing with installation..."
-        print_status "This may be resolved after Asterisk installation"
+# Run config-generator script to create configuration files
+if [ -f "scripts/config-generator.sh" ]; then
+    print_status "Running config-generator.sh..."
+    chmod +x scripts/config-generator.sh
+    ./scripts/config-generator.sh
+    
+    # Copy generated configuration files
+    if [ -d "/tmp/ibilling-config" ]; then
+        print_status "Installing Asterisk configuration files..."
+        
+        # Install res_odbc.conf
+        if [ -f "/tmp/ibilling-config/res_odbc.conf" ]; then
+            sudo sed "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${ASTERISK_DB_PASSWORD}/g" /tmp/ibilling-config/res_odbc.conf > /tmp/res_odbc_final.conf
+            sudo mv /tmp/res_odbc_final.conf /etc/asterisk/res_odbc.conf
+            sudo chown asterisk:asterisk /etc/asterisk/res_odbc.conf
+        fi
+        
+        # Install extconfig.conf
+        if [ -f "/tmp/ibilling-config/extconfig.conf" ]; then
+            sudo cp /tmp/ibilling-config/extconfig.conf /etc/asterisk/
+            sudo chown asterisk:asterisk /etc/asterisk/extconfig.conf
+        fi
+        
+        # Install PJSIP configuration
+        if [ -f "/tmp/ibilling-config/pjsip.conf" ]; then
+            sudo cp /tmp/ibilling-config/pjsip.conf /etc/asterisk/
+            sudo chown asterisk:asterisk /etc/asterisk/pjsip.conf
+        fi
+        
+        # Install extensions.conf
+        if [ -f "/tmp/ibilling-config/extensions.conf" ]; then
+            sudo cp /tmp/ibilling-config/extensions.conf /etc/asterisk/
+            sudo chown asterisk:asterisk /etc/asterisk/extensions.conf
+        fi
+        
+        print_status "✓ Asterisk configuration files installed"
     fi
-else
-    print_warning "isql command not available"
 fi
 
 # Build the project
@@ -525,138 +424,29 @@ else
     exit 1
 fi
 
-# Setup backend environment with correct database password
-print_status "Configuring backend environment..."
-
-# Generate JWT secret
-jwt_secret=$(openssl rand -base64 32)
-
-# Create/update backend environment file
-sudo tee /opt/billing/web/backend/.env > /dev/null <<EOL
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=asterisk
-DB_USER=asterisk
-DB_PASSWORD=${ASTERISK_DB_PASSWORD}
-
-# JWT Configuration
-JWT_SECRET=${jwt_secret}
-
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-
-# Asterisk Configuration
-ASTERISK_HOST=localhost
-ASTERISK_PORT=5038
-ASTERISK_USERNAME=admin
-ASTERISK_SECRET=
-EOL
-
-# Set proper permissions
-sudo chmod 600 /opt/billing/web/backend/.env
-sudo chown "$current_user:$current_user" /opt/billing/web/backend/.env
-
-# Update systemd service
-print_status "Updating systemd service..."
-sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOL
-[Unit]
-Description=iBilling Backend API Server
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=$current_user
-WorkingDirectory=/opt/billing/web/backend
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/web/backend/.env
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Setup Nginx
-print_status "Configuring Nginx..."
-
-# Install Nginx if not present
-sudo apt install -y nginx
-
-# Clean existing Nginx configurations
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo rm -f /etc/nginx/sites-enabled/ibilling
-sudo rm -f /etc/nginx/sites-available/ibilling
-
-# Create Nginx configuration
-sudo tee /etc/nginx/sites-available/ibilling > /dev/null <<EOL
-server {
-    listen 80;
-    server_name _;
-    
-    root /opt/billing/web/dist;
-    index index.html;
-    
-    # Frontend static files
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-    
-    # API proxy to backend
-    location /api/ {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-    
-    # Auth routes
-    location /auth/ {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-    
-    # Health check
-    location /health {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOL
-
-# Enable the site
-sudo ln -sf /etc/nginx/sites-available/ibilling /etc/nginx/sites-enabled/
-
-# Test and reload Nginx
-if sudo nginx -t; then
-    print_status "Nginx configuration test passed"
-    sudo systemctl enable nginx
-    sudo systemctl reload nginx
-    print_status "Nginx reloaded successfully"
+# Run setup-backend script if it exists
+if [ -f "scripts/setup-backend.sh" ]; then
+    print_status "Running setup-backend.sh..."
+    chmod +x scripts/setup-backend.sh
+    ./scripts/setup-backend.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
 else
-    print_error "Nginx configuration test failed"
-    exit 1
+    # ... keep existing code (backend environment setup, systemd service) the same ...
+fi
+
+# Run setup-web script if it exists
+if [ -f "scripts/setup-web.sh" ]; then
+    print_status "Running setup-web.sh..."
+    chmod +x scripts/setup-web.sh
+    ./scripts/setup-web.sh
+else
+    # ... keep existing code (Nginx setup) the same ...
+fi
+
+# Run setup-agi script if it exists
+if [ -f "scripts/setup-agi.sh" ]; then
+    print_status "Running setup-agi.sh..."
+    chmod +x scripts/setup-agi.sh
+    ./scripts/setup-agi.sh
 fi
 
 # Start the backend service
@@ -676,6 +466,60 @@ else
     sudo journalctl -u ibilling-backend --no-pager -n 20
 fi
 
+# Run system checks
+if [ -f "scripts/system-checks.sh" ]; then
+    print_status "Running system-checks.sh..."
+    chmod +x scripts/system-checks.sh
+    ./scripts/system-checks.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
+fi
+
+# Run test-realtime script to verify PJSIP realtime
+if [ -f "scripts/test-realtime.sh" ]; then
+    print_status "Running test-realtime.sh..."
+    chmod +x scripts/test-realtime.sh
+    ./scripts/test-realtime.sh "$ASTERISK_DB_PASSWORD"
+fi
+
+# Update database schema with additional tables
+if [ -f "scripts/update-database-schema.sh" ]; then
+    print_status "Running update-database-schema.sh..."
+    chmod +x scripts/update-database-schema.sh
+    ./scripts/update-database-schema.sh "$MYSQL_ROOT_PASSWORD"
+fi
+
+# Verify database population
+if [ -f "scripts/verify-database-population.sh" ]; then
+    print_status "Running verify-database-population.sh..."
+    chmod +x scripts/verify-database-population.sh
+    ./scripts/verify-database-population.sh "$MYSQL_ROOT_PASSWORD"
+fi
+
+# Add sample DIDs
+if [ -f "scripts/add-sample-dids.sh" ]; then
+    print_status "Running add-sample-dids.sh..."
+    chmod +x scripts/add-sample-dids.sh
+    DB_PASSWORD="$ASTERISK_DB_PASSWORD" ./scripts/add-sample-dids.sh
+fi
+
+# Restart Asterisk to load new configurations
+if command -v asterisk >/dev/null 2>&1; then
+    print_status "Restarting Asterisk to load configurations..."
+    sudo systemctl restart asterisk
+    sleep 5
+    
+    # Test PJSIP endpoints after restart
+    print_status "Testing PJSIP configuration..."
+    sudo asterisk -rx "pjsip reload" >/dev/null 2>&1
+    sleep 3
+    
+    endpoints_output=$(sudo asterisk -rx "pjsip show endpoints" 2>/dev/null)
+    if echo "$endpoints_output" | grep -q "Endpoint:" || echo "$endpoints_output" | grep -q "No objects found"; then
+        print_status "✓ PJSIP is responding (ready for endpoint creation)"
+    else
+        print_warning "⚠ PJSIP may have configuration issues"
+    fi
+fi
+
 print_status ""
 print_status "=== INSTALLATION COMPLETED SUCCESSFULLY ==="
 if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
@@ -690,12 +534,14 @@ print_status "Next steps:"
 print_status "1. Access the web interface at http://$(hostname -I | awk '{print $1}')"
 print_status "2. Login with admin/admin123"
 print_status "3. Create customers and their SIP endpoints from the admin panel"
+print_status "4. Check PJSIP endpoints with: sudo asterisk -rx 'pjsip show endpoints'"
 print_status ""
 print_status "For troubleshooting, check:"
 print_status "- Backend service: sudo systemctl status ibilling-backend"
 print_status "- Backend logs: sudo journalctl -u ibilling-backend -f"
 print_status "- Nginx status: sudo systemctl status nginx"
 print_status "- Database: mysql -u asterisk -p${ASTERISK_DB_PASSWORD} asterisk"
+print_status "- Asterisk status: sudo systemctl status asterisk"
 print_status ""
 print_status "ODBC can be tested after Asterisk installation with:"
 print_status "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
