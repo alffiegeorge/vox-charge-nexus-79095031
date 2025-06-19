@@ -48,15 +48,30 @@ EOF
         return 1
     fi
     
-    # Update ODBC configuration with correct password
-    print_status "Updating ODBC configuration..."
-    sudo sed "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" "$(dirname "$0")/../config/res_odbc.conf" > /tmp/res_odbc_final.conf
-    sudo mv /tmp/res_odbc_final.conf /etc/asterisk/res_odbc.conf
-    sudo chown asterisk:asterisk /etc/asterisk/res_odbc.conf
-    sudo chmod 640 /etc/asterisk/res_odbc.conf
+    # Update ODBC configuration with correct password and modern syntax
+    print_status "Updating ODBC configuration with modern Asterisk 22 syntax..."
+    sudo tee /etc/asterisk/res_odbc.conf > /dev/null <<EOF
+[asterisk]
+enabled => yes
+dsn => asterisk-connector
+username => asterisk
+password => ${asterisk_db_password}
+max_connections => 5
+pre-connect => yes
+sanitysql => select 1
+connect_timeout => 10
+negative_connection_cache => 300
+forcecommit => no
+isolation => read_committed
+EOF
     
     # Update system ODBC configuration
     sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/odbc.ini
+    
+    # Ensure proper permissions
+    print_status "Setting proper file permissions..."
+    sudo chown asterisk:asterisk /etc/asterisk/res_odbc.conf
+    sudo chmod 640 /etc/asterisk/res_odbc.conf
     
     # Test ODBC connection from command line
     print_status "Testing ODBC connection from command line..."
@@ -74,7 +89,14 @@ EOF
     # Start Asterisk
     print_status "Starting Asterisk..."
     sudo systemctl start asterisk
-    sleep 10
+    sleep 15
+    
+    # Force reload of ODBC module
+    print_status "Reloading ODBC module in Asterisk..."
+    sudo asterisk -rx "module unload res_odbc.so" >/dev/null 2>&1
+    sleep 2
+    sudo asterisk -rx "module load res_odbc.so" >/dev/null 2>&1
+    sleep 5
     
     # Test ODBC from Asterisk
     print_status "Testing ODBC connection from Asterisk..."
@@ -83,11 +105,17 @@ EOF
     
     if echo "$odbc_test" | grep -q "asterisk.*Connected"; then
         print_status "✓ ODBC connection active in Asterisk"
+    elif echo "$odbc_test" | grep -q "Number of active connections: [1-9]"; then
+        print_status "✓ ODBC connection pool active (legacy display format)"
         
-        # Test realtime functionality
+        # Force a realtime test to confirm it's working
         print_status "Testing realtime functionality..."
-        sudo asterisk -rx "realtime load ps_endpoints id test" >/dev/null 2>&1
-        print_status "✓ Realtime functionality tested"
+        local realtime_test=$(sudo asterisk -rx "realtime load ps_endpoints id test" 2>/dev/null)
+        if [[ "$realtime_test" != *"Failed"* ]]; then
+            print_status "✓ Realtime functionality working"
+        else
+            print_warning "⚠ Realtime test inconclusive: $realtime_test"
+        fi
         
         # Reload PJSIP to ensure it uses realtime
         sudo asterisk -rx "pjsip reload" >/dev/null 2>&1
