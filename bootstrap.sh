@@ -9,17 +9,25 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
+# Function to print colored output with proper line breaks
 print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "\n${GREEN}[INFO]${NC} $1"
+    sleep 0.1  # Small delay to ensure proper output ordering
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "\n${YELLOW}[WARNING]${NC} $1"
+    sleep 0.1
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "\n${RED}[ERROR]${NC} $1"
+    sleep 0.1
+}
+
+# Function to print separator
+print_separator() {
+    echo -e "\n=================================================="
 }
 
 # Function to generate random password
@@ -68,14 +76,18 @@ if [ "$EUID" -eq 0 ]; then
     exit 1
 fi
 
+print_separator
+print_status "Starting iBilling Bootstrap Installation"
+print_separator
+
 # Generate random passwords if not provided
 if [ $# -eq 0 ]; then
     print_status "No passwords provided, generating random passwords..."
     MYSQL_ROOT_PASSWORD=$(generate_password)
     ASTERISK_DB_PASSWORD=$(generate_password)
-    print_status "Generated MySQL root password: $MYSQL_ROOT_PASSWORD"
-    print_status "Generated Asterisk DB password: $ASTERISK_DB_PASSWORD"
-    print_status "Please save these passwords securely!"
+    echo -e "\n${GREEN}Generated MySQL root password:${NC} $MYSQL_ROOT_PASSWORD"
+    echo -e "${GREEN}Generated Asterisk DB password:${NC} $ASTERISK_DB_PASSWORD"
+    print_warning "Please save these passwords securely!"
 elif [ $# -eq 1 ]; then
     ASTERISK_DB_PASSWORD=$1
     MYSQL_ROOT_PASSWORD="admin123"
@@ -85,7 +97,7 @@ elif [ $# -eq 2 ]; then
     ASTERISK_DB_PASSWORD=$2
     print_status "Using provided passwords"
 else
-    echo "Usage: $0 [mysql_root_password] [asterisk_db_password]"
+    echo -e "\nUsage: $0 [mysql_root_password] [asterisk_db_password]"
     echo "   or: $0 [asterisk_db_password] (if MySQL is already configured)"
     echo "   or: $0 (to generate random passwords)"
     exit 1
@@ -94,7 +106,7 @@ fi
 # GitHub repository URL
 REPO_URL="https://github.com/alffiegeorge/vox-charge-nexus-79095031.git"
 
-# Setup directories
+print_separator
 print_status "Setting up directories..."
 sudo mkdir -p /opt/billing
 cd /opt/billing
@@ -105,10 +117,9 @@ if [ -d "web" ]; then
     sudo rm -rf web
 fi
 
-# Clone the repository ONCE
 print_status "Cloning iBilling repository..."
 if sudo git clone "$REPO_URL" web; then
-    print_status "Repository cloned successfully"
+    print_status "✓ Repository cloned successfully"
 else
     print_error "Failed to clone repository"
     exit 1
@@ -121,8 +132,8 @@ cd web
 current_user=$(whoami)
 sudo chown -R "$current_user:$current_user" /opt/billing/web
 
-# Make all scripts executable
-print_status "Making all scripts executable..."
+print_separator
+print_status "Making scripts executable..."
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x install.sh 2>/dev/null || true
 
@@ -132,39 +143,38 @@ if [ -f "scripts/make-scripts-executable.sh" ]; then
     ./scripts/make-scripts-executable.sh
 fi
 
-# Install system packages
+print_separator
 print_status "Installing system packages..."
-sudo apt update
-sudo apt install -y wget mariadb-client net-tools vim git locales
+sudo apt update >/dev/null 2>&1
+sudo apt install -y wget mariadb-client net-tools vim git locales >/dev/null 2>&1
 
 # Install Node.js if not present
 if ! command -v node >/dev/null 2>&1; then
     print_status "Installing Node.js..."
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt install -y nodejs
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - >/dev/null 2>&1
+    sudo apt install -y nodejs >/dev/null 2>&1
 fi
 
-# Install backend dependencies FIRST in the correct location
+print_separator
 print_status "Installing backend dependencies..."
 if [ -d "backend" ] && [ -f "backend/package.json" ]; then
     cd backend
-    npm install
+    npm install >/dev/null 2>&1
     print_status "✓ Backend dependencies installed"
     cd ..
 else
     print_warning "Backend directory or package.json not found"
 fi
 
-# Install frontend dependencies
 print_status "Installing frontend dependencies..."
 if [ -f "package.json" ]; then
-    npm install
+    npm install >/dev/null 2>&1
     print_status "✓ Frontend dependencies installed"
 else
     print_warning "No package.json found in root directory"
 fi
 
-# Database setup with fallback methods
+print_separator
 print_status "Setting up database with fallback methods..."
 
 # Method 1: Try password reset first
@@ -174,7 +184,7 @@ if reset_mariadb_password "$MYSQL_ROOT_PASSWORD"; then
     
     # Create asterisk database and user
     print_status "Creating asterisk database and user..."
-    mysql -u root -p"$MYSQL_ROOT_PASSWORD" <<EOF
+    mysql -u root -p"$MYSQL_ROOT_PASSWORD" <<EOF >/dev/null 2>&1
 CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '$ASTERISK_DB_PASSWORD';
 GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
@@ -202,9 +212,9 @@ else
     fi
 fi
 
-# Setup initial database schema with simpler table structure
+print_separator
 print_status "Setting up database schema..."
-mysql -u root -p"$MYSQL_ROOT_PASSWORD" asterisk <<EOF
+mysql -u root -p"$MYSQL_ROOT_PASSWORD" asterisk <<EOF >/dev/null 2>&1
 -- Create customers table if it doesn't exist
 CREATE TABLE IF NOT EXISTS customers (
     id VARCHAR(50) PRIMARY KEY,
@@ -398,7 +408,7 @@ fi
 export MYSQL_ROOT_PASSWORD
 export ASTERISK_DB_PASSWORD
 
-# Run the installation script with passwords
+print_separator
 print_status "Running main installation script..."
 if [ -f "install.sh" ]; then
     chmod +x install.sh
@@ -407,28 +417,28 @@ else
     print_warning "install.sh not found, continuing with manual setup..."
 fi
 
-# Run individual scripts from the scripts folder
+print_separator
 print_status "Running additional setup scripts..."
 
 # Run setup-database script if it exists
 if [ -f "scripts/setup-database.sh" ]; then
     print_status "Running setup-database.sh..."
     chmod +x scripts/setup-database.sh
-    ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
+    ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1
 fi
 
 # Run setup-odbc script if it exists
 if [ -f "scripts/setup-odbc.sh" ]; then
     print_status "Running setup-odbc.sh..."
     chmod +x scripts/setup-odbc.sh
-    ./scripts/setup-odbc.sh "$ASTERISK_DB_PASSWORD"
+    ./scripts/setup-odbc.sh "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1
 fi
 
 # Run config-generator script to create configuration files
 if [ -f "scripts/config-generator.sh" ]; then
     print_status "Running config-generator.sh..."
     chmod +x scripts/config-generator.sh
-    ./scripts/config-generator.sh
+    ./scripts/config-generator.sh >/dev/null 2>&1
     
     # Copy generated configuration files
     if [ -d "/tmp/ibilling-config" ]; then
@@ -463,10 +473,10 @@ if [ -f "scripts/config-generator.sh" ]; then
     fi
 fi
 
-# Build the project
+print_separator
 print_status "Building the project..."
-if npm run build; then
-    print_status "Project built successfully"
+if npm run build >/dev/null 2>&1; then
+    print_status "✓ Project built successfully"
 else
     print_error "Failed to build project"
     exit 1
@@ -496,8 +506,8 @@ fi
 
 # Start the backend service
 print_status "Starting backend service..."
-sudo systemctl enable ibilling-backend
-sudo systemctl restart ibilling-backend
+sudo systemctl enable ibilling-backend >/dev/null 2>&1
+sudo systemctl restart ibilling-backend >/dev/null 2>&1
 
 # Wait for service to start
 sleep 5
@@ -511,18 +521,18 @@ else
     sudo journalctl -u ibilling-backend --no-pager -n 20
 fi
 
-# Fix realtime authentication dynamically after Asterisk installation
+print_separator
 print_status "Fixing realtime authentication..."
 if [ -f "scripts/fix-realtime-auth.sh" ]; then
     chmod +x scripts/fix-realtime-auth.sh
-    if ./scripts/fix-realtime-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+    if ./scripts/fix-realtime-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1; then
         print_status "✓ Realtime authentication fixed successfully"
         
         # Test realtime functionality
         if [ -f "scripts/test-realtime-complete.sh" ]; then
             print_status "Testing realtime functionality..."
             chmod +x scripts/test-realtime-complete.sh
-            if ./scripts/test-realtime-complete.sh "$ASTERISK_DB_PASSWORD"; then
+            if ./scripts/test-realtime-complete.sh "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1; then
                 print_status "✓ Realtime functionality test passed"
             else
                 print_warning "⚠ Realtime functionality test encountered issues"
@@ -530,8 +540,8 @@ if [ -f "scripts/fix-realtime-auth.sh" ]; then
         fi
     else
         print_warning "⚠ Realtime authentication fix encountered issues"
-        print_status "You can manually fix this later by running:"
-        print_status "sudo ./scripts/fix-realtime-auth.sh $MYSQL_ROOT_PASSWORD $ASTERISK_DB_PASSWORD"
+        echo -e "\nYou can manually fix this later by running:"
+        echo -e "sudo ./scripts/fix-realtime-auth.sh $MYSQL_ROOT_PASSWORD $ASTERISK_DB_PASSWORD"
     fi
 else
     print_warning "⚠ Realtime authentication fix script not found"
@@ -569,7 +579,7 @@ fi
 # Restart Asterisk to load new configurations
 if command -v asterisk >/dev/null 2>&1; then
     print_status "Restarting Asterisk to load configurations..."
-    sudo systemctl restart asterisk
+    sudo systemctl restart asterisk >/dev/null 2>&1
     sleep 5
     
     # Test PJSIP endpoints after restart
@@ -585,31 +595,35 @@ if command -v asterisk >/dev/null 2>&1; then
     fi
 fi
 
-print_status ""
-print_status "=== INSTALLATION COMPLETED SUCCESSFULLY ==="
-if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
-    print_status "MySQL root password: $MYSQL_ROOT_PASSWORD"
-fi
-print_status "Asterisk DB password: $ASTERISK_DB_PASSWORD"
-print_status "Please save these passwords securely!"
-print_status ""
-print_status "Installation location: /opt/billing/web"
-print_status ""
-print_status "Next steps:"
-print_status "1. Access the web interface at http://$(hostname -I | awk '{print $1}')"
-print_status "2. Login with admin/admin123"
-print_status "3. Create customers and their SIP endpoints from the admin panel"
-print_status "4. Check PJSIP endpoints with: sudo asterisk -rx 'pjsip show endpoints'"
-print_status ""
-print_status "For troubleshooting, check:"
-print_status "- Backend service: sudo systemctl status ibilling-backend"
-print_status "- Backend logs: sudo journalctl -u ibilling-backend -f"
-print_status "- Nginx status: sudo systemctl status nginx"
-print_status "- Database: mysql -u asterisk -p${ASTERISK_DB_PASSWORD} asterisk"
-print_status "- Asterisk status: sudo systemctl status asterisk"
-print_status ""
-print_status "ODBC connection status can be checked with:"
-print_status "- sudo asterisk -rx 'odbc show all'"
-print_status "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
+print_separator
+print_status "INSTALLATION COMPLETED SUCCESSFULLY"
+print_separator
 
+if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
+    echo -e "\n${GREEN}MySQL root password:${NC} $MYSQL_ROOT_PASSWORD"
+fi
+echo -e "${GREEN}Asterisk DB password:${NC} $ASTERISK_DB_PASSWORD"
+print_warning "Please save these passwords securely!"
+
+echo -e "\n${GREEN}Installation location:${NC} /opt/billing/web"
+
+echo -e "\n${GREEN}Next steps:${NC}"
+echo "1. Access the web interface at http://$(hostname -I | awk '{print $1}')"
+echo "2. Login with admin/admin123"
+echo "3. Create customers and their SIP endpoints from the admin panel"
+echo "4. Check PJSIP endpoints with: sudo asterisk -rx 'pjsip show endpoints'"
+
+echo -e "\n${GREEN}For troubleshooting, check:${NC}"
+echo "- Backend service: sudo systemctl status ibilling-backend"
+echo "- Backend logs: sudo journalctl -u ibilling-backend -f"
+echo "- Nginx status: sudo systemctl status nginx"
+echo "- Database: mysql -u asterisk -p${ASTERISK_DB_PASSWORD} asterisk"
+echo "- Asterisk status: sudo systemctl status asterisk"
+
+echo -e "\n${GREEN}ODBC connection status can be checked with:${NC}"
+echo "- sudo asterisk -rx 'odbc show all'"
+echo "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
+
+print_separator
 print_status "Bootstrap completed successfully!"
+print_separator
