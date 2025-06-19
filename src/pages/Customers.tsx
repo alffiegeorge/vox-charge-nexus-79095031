@@ -43,6 +43,7 @@ const Customers = () => {
   const [viewingSipCredentials, setViewingSipCredentials] = useState<Customer | null>(null);
   const [sipCredentials, setSipCredentials] = useState<SipCredentials | null>(null);
   const [loadingSipCredentials, setLoadingSipCredentials] = useState(false);
+  const [creatingEndpoint, setCreatingEndpoint] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCustomers();
@@ -251,6 +252,49 @@ const Customers = () => {
       }
       return customer;
     }));
+  };
+
+  const handleCreateSipEndpoint = async (customerId: string) => {
+    setCreatingEndpoint(customerId);
+    try {
+      console.log('Creating SIP endpoint for customer:', customerId);
+      
+      const response = await apiClient.request(`/api/customers/${customerId}/create-sip-endpoint`, {
+        method: 'POST'
+      });
+      
+      console.log('SIP endpoint created successfully:', response);
+      
+      toast({
+        title: "SIP Endpoint Created",
+        description: "SIP endpoint has been created successfully for the customer.",
+      });
+      
+      // Refresh the SIP credentials if the dialog is open
+      if (viewingSipCredentials && viewingSipCredentials.id === customerId) {
+        fetchSipCredentials(customerId);
+      }
+      
+    } catch (error) {
+      console.error('Error creating SIP endpoint:', error);
+      
+      let errorMessage = 'Failed to create SIP endpoint';
+      if (error instanceof Error) {
+        if (error.message.includes('already exists')) {
+          errorMessage = 'SIP endpoint already exists for this customer';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast({
+        title: "Error Creating SIP Endpoint",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingEndpoint(null);
+    }
   };
 
   const filteredCustomers = customers.filter(customer =>
@@ -531,10 +575,26 @@ const Customers = () => {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-4 text-gray-500">
-                  <Settings className="h-12 w-12 text-gray-300 mx-auto mb-2" />
-                  <p>No SIP credentials found</p>
-                  <p className="text-sm">SIP endpoint may need to be created for this customer</p>
+                <div className="text-center py-4 space-y-4">
+                  <div className="text-gray-500">
+                    <Settings className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                    <p>No SIP credentials found</p>
+                    <p className="text-sm">SIP endpoint may need to be created for this customer</p>
+                  </div>
+                  <Button
+                    onClick={() => handleCreateSipEndpoint(viewingSipCredentials.id)}
+                    disabled={creatingEndpoint === viewingSipCredentials.id}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {creatingEndpoint === viewingSipCredentials.id ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Creating...
+                      </>
+                    ) : (
+                      'Create SIP Endpoint'
+                    )}
+                  </Button>
                 </div>
               )}
               <div className="flex justify-end">

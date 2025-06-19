@@ -305,6 +305,12 @@ export class ApiClient {
     return this.request('/api/sms/stats');
   }
 
+  async createSipEndpoint(customerId: string) {
+    return this.request(`/api/customers/${customerId}/create-sip-endpoint`, {
+      method: 'POST',
+    });
+  }
+
   logout() {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userRole');

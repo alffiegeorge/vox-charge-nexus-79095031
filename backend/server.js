@@ -659,7 +659,60 @@ app.get('/api/customers/:id/sip', authenticateToken, async (req, res) => {
   }
 });
 
-// New route to list Asterisk endpoints
+// New route to manually create SIP endpoint for existing customer
+app.post('/api/customers/:id/create-sip-endpoint', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('Manually creating SIP endpoint for customer:', id);
+    
+    // First check if customer exists
+    const [customers] = await executeQuery(
+      'SELECT * FROM customers WHERE id = ?',
+      [id]
+    );
+    
+    if (customers.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    
+    const customer = customers[0];
+    
+    // Check if SIP credentials already exist
+    const existingCredentials = await asteriskManager.getSipCredentials(id);
+    if (existingCredentials) {
+      return res.status(400).json({ 
+        error: 'SIP endpoint already exists for this customer',
+        credentials: {
+          sip_username: existingCredentials.sip_username,
+          sip_domain: existingCredentials.sip_domain,
+          status: existingCredentials.status
+        }
+      });
+    }
+    
+    // Create the SIP endpoint
+    const sipCredentials = await asteriskManager.createPJSIPEndpoint(id, {
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone
+    });
+    
+    console.log('✓ SIP endpoint created successfully for customer:', id);
+    
+    res.json({
+      message: 'SIP endpoint created successfully',
+      credentials: sipCredentials
+    });
+    
+  } catch (error) {
+    console.error('Error creating SIP endpoint:', error);
+    res.status(500).json({ 
+      error: 'Failed to create SIP endpoint', 
+      details: error.message 
+    });
+  }
+});
+
 app.get('/api/asterisk/endpoints', authenticateToken, async (req, res) => {
   try {
     const endpoints = await asteriskManager.listEndpoints();
