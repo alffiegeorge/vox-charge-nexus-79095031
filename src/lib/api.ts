@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://172.31.10.10:3001';
 
 export interface LoginCredentials {
   username: string;
@@ -42,14 +42,8 @@ export class ApiClient {
       console.warn('No auth token found for request to:', endpoint);
     }
 
-    // Ensure the endpoint starts with /api/ for API calls (except auth routes)
+    // Construct the full URL
     let fullUrl = `${API_BASE_URL}${endpoint}`;
-    if (endpoint.startsWith('/api/') || endpoint.startsWith('/auth/') || endpoint.startsWith('/health')) {
-      fullUrl = `${API_BASE_URL}${endpoint}`;
-    } else {
-      // This shouldn't happen with our current setup, but just in case
-      fullUrl = `${API_BASE_URL}/api${endpoint}`;
-    }
 
     console.log(`API Request: ${options.method || 'GET'} ${fullUrl}`);
     console.log('Request headers:', headers);
@@ -59,6 +53,8 @@ export class ApiClient {
       const response = await fetch(fullUrl, {
         ...options,
         headers,
+        mode: 'cors', // Explicitly set CORS mode
+        credentials: 'omit', // Don't send credentials for CORS
       });
 
       console.log(`API Response: ${response.status} ${response.statusText}`);
@@ -69,7 +65,12 @@ export class ApiClient {
         try {
           error = await response.json();
         } catch {
-          error = { error: `HTTP ${response.status}: ${response.statusText}` };
+          // If we can't parse JSON, create a generic error
+          if (response.status === 0 || response.status >= 500) {
+            error = { error: 'Unable to connect to server. Please check if the backend is running.' };
+          } else {
+            error = { error: `HTTP ${response.status}: ${response.statusText}` };
+          }
         }
         console.error('API Error response:', error);
         throw new Error(error.error || `HTTP ${response.status}`);
@@ -80,11 +81,18 @@ export class ApiClient {
       return data;
     } catch (fetchError) {
       console.error('API Fetch error:', fetchError);
+      
+      // Check if it's a network error
+      if (fetchError instanceof TypeError && fetchError.message.includes('fetch')) {
+        throw new Error('Unable to connect to server. Please check your network connection and ensure the backend is running.');
+      }
+      
       throw fetchError;
     }
   }
 
   async login(credentials: LoginCredentials): Promise<LoginResponse> {
+    console.log('Attempting login with API_BASE_URL:', API_BASE_URL);
     return this.request<LoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),

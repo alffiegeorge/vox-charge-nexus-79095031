@@ -17,17 +17,18 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware - ORDER MATTERS!
 app.use(cors({
-  origin: '*',
+  origin: '*', // Allow all origins for now
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false, // Don't require credentials for CORS
+  optionsSuccessStatus: 200 // For legacy browser support
 }));
 
 // Handle preflight requests FIRST
 app.options('*', (req, res) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.status(200).send();
 });
 
@@ -50,6 +51,7 @@ app.use((req, res, next) => {
 // Global database connection status
 let isDatabaseConnected = false;
 
+// Initialize database connection
 async function initializeDatabase() {
   const success = await createDatabasePool();
   if (success) {
@@ -74,6 +76,7 @@ async function initializeDatabase() {
   }
 }
 
+// Create users table
 async function createUsersTable() {
   try {
     console.log('Creating/checking users table...');
@@ -161,6 +164,7 @@ async function createUsersTable() {
   }
 }
 
+// Create billing core tables
 async function createBillingTables() {
   try {
     console.log('Creating billing core tables...');
@@ -312,6 +316,11 @@ app.post('/auth/login', async (req, res) => {
   console.log('Path:', req.path);
   console.log('Headers:', req.headers);
   console.log('Body:', req.body);
+  
+  // Add CORS headers explicitly for login
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
   try {
     const { username, password } = req.body;
