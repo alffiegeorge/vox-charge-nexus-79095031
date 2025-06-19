@@ -2,7 +2,7 @@
 #!/bin/bash
 
 # iBilling Bootstrap Script
-# This script downloads all necessary files and runs the installation
+# This script clones the repository and runs the installation
 
 # Colors for output
 RED='\033[0;31m'
@@ -56,259 +56,68 @@ else
     exit 1
 fi
 
-# GitHub repository URL - using the actual repository
-REPO_URL="https://raw.githubusercontent.com/alffiegeorge/vox-charge-nexus-79095031/refs/heads/main"
+# GitHub repository URL
+REPO_URL="https://github.com/alffiegeorge/vox-charge-nexus-79095031.git"
 
-# Create temporary directory for downloads
-TEMP_DIR="/tmp/ibilling-setup"
-sudo rm -rf "$TEMP_DIR"
-mkdir -p "$TEMP_DIR"
-cd "$TEMP_DIR"
+# Setup directories
+print_status "Setting up directories..."
+sudo mkdir -p /opt/billing
+cd /opt/billing
 
-print_status "Downloading iBilling installation files..."
-
-# Download file function with proper directory handling
-download_file() {
-    local file_path=$1
-    local url="${REPO_URL}/${file_path}"
-    local dir=$(dirname "$file_path")
-    
-    # Create directory structure if needed
-    if [ "$dir" != "." ]; then
-        mkdir -p "$dir"
-    fi
-    
-    print_status "Downloading ${file_path}..."
-    if wget -q "$url" -O "$file_path"; then
-        return 0
-    else
-        print_error "Failed to download ${file_path} from ${url}"
-        return 1
-    fi
-}
-
-# List of files to download that actually exist in the repository
-files_to_download=(
-    "scripts/utils.sh"
-    "scripts/debug-asterisk.sh"
-    "scripts/setup-database.sh"
-    "scripts/setup-web.sh"
-    "scripts/install-asterisk.sh"
-    "scripts/setup-odbc.sh"
-    "config/res_odbc.conf"
-    "config/cdr_adaptive_odbc.conf"
-    "config/extconfig.conf"
-    "config/extensions.conf"
-    "config/pjsip.conf"
-    "config/odbcinst.ini"
-    "config/odbc.ini.template"
-    "config/nginx-ibilling.conf"
-    "backend/.env.example"
-)
-
-# Download all files
-failed_downloads=()
-for file in "${files_to_download[@]}"; do
-    if ! download_file "$file"; then
-        failed_downloads+=("$file")
-    fi
-done
-
-# Check if any critical downloads failed
-if [ ${#failed_downloads[@]} -gt 0 ]; then
-    print_warning "Some files failed to download:"
-    for file in "${failed_downloads[@]}"; do
-        echo "  - $file"
-    done
-    print_status "Continuing with available files..."
+# Remove existing installation if any
+if [ -d "web" ]; then
+    print_status "Removing existing installation..."
+    sudo rm -rf web
 fi
 
-# Create a simplified install.sh that uses existing scripts
-print_status "Creating installation script..."
-cat > install.sh << 'EOF'
-#!/bin/bash
-
-# iBilling installation main script
-source "scripts/utils.sh"
-
-main() {
-    print_status "Starting iBilling installation..."
-    
-    # Parse arguments
-    if [ $# -eq 0 ]; then
-        echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
-        echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
-        exit 1
-    fi
-
-    if [ $# -eq 2 ]; then
-        MYSQL_ROOT_PASSWORD=$1
-        ASTERISK_DB_PASSWORD=$2
-    elif [ $# -eq 1 ]; then
-        ASTERISK_DB_PASSWORD=$1
-    else
-        echo "Usage: $0 <mysql_root_password> <asterisk_db_password>"
-        echo "   or: $0 <asterisk_db_password> (if MySQL is already configured)"
-        exit 1
-    fi
-    
-    # Install system packages
-    print_status "Setting up system packages..."
-    sudo apt update
-    sudo apt install -y wget mariadb-client net-tools vim git locales
-    sudo locale-gen en_US.UTF-8
-    sudo update-locale LANG=en_US.UTF-8
-    sudo timedatectl set-timezone UTC
-    
-    # Setup database
-    if [ -n "$MYSQL_ROOT_PASSWORD" ] && [ -n "$ASTERISK_DB_PASSWORD" ]; then
-        if [ -f "scripts/setup-database.sh" ]; then
-            chmod +x scripts/setup-database.sh
-            ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
-        else
-            print_error "Database setup script not found"
-            exit 1
-        fi
-    fi
-    
-    # Setup ODBC
-    if [ -f "scripts/setup-odbc.sh" ]; then
-        chmod +x scripts/setup-odbc.sh
-        ./scripts/setup-odbc.sh "$ASTERISK_DB_PASSWORD"
-    fi
-    
-    # Install Asterisk
-    if [ -f "scripts/install-asterisk.sh" ]; then
-        chmod +x scripts/install-asterisk.sh
-        ./scripts/install-asterisk.sh "$ASTERISK_DB_PASSWORD"
-    else
-        print_error "Asterisk installation script not found"
-        exit 1
-    fi
-    
-    # Create backend service environment
-    print_status "Setting up backend service..."
-    sudo mkdir -p /opt/billing
-    
-    # Generate JWT secret
-    jwt_secret=$(openssl rand -base64 32)
-    
-    # Create environment file
-    sudo tee /opt/billing/.env > /dev/null <<EOL
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=asterisk
-DB_USER=asterisk
-DB_PASSWORD=${ASTERISK_DB_PASSWORD}
-
-# JWT Configuration
-JWT_SECRET=${jwt_secret}
-
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-
-# Asterisk Configuration
-ASTERISK_HOST=localhost
-ASTERISK_PORT=5038
-ASTERISK_USERNAME=admin
-ASTERISK_SECRET=
-EOL
-
-    # Set proper permissions
-    sudo chmod 600 /opt/billing/.env
-    sudo chown root:root /opt/billing/.env
-    
-    # Create systemd service
-    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOL
-[Unit]
-Description=iBilling Backend API Server
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=ihs
-WorkingDirectory=/opt/billing/web/backend
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/.env
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-    # Reload systemd
-    sudo systemctl daemon-reload
-    
-    print_status "iBilling installation completed successfully!"
-}
-
-# Execute if run directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+# Clone the repository
+print_status "Cloning iBilling repository..."
+if sudo git clone "$REPO_URL" web; then
+    print_status "Repository cloned successfully"
+else
+    print_error "Failed to clone repository"
+    exit 1
 fi
-EOF
+
+# Change to the repository directory
+cd web
+
+# Set permissions for the current user
+current_user=$(whoami)
+sudo chown -R "$current_user:$current_user" /opt/billing/web
 
 # Make scripts executable
-if [ -d "scripts" ]; then
-    chmod +x scripts/*.sh 2>/dev/null || true
+print_status "Making scripts executable..."
+chmod +x scripts/*.sh 2>/dev/null || true
+chmod +x install.sh 2>/dev/null || true
+
+# Install system packages
+print_status "Installing system packages..."
+sudo apt update
+sudo apt install -y wget mariadb-client net-tools vim git locales
+
+# Install Node.js if not present
+if ! command -v node >/dev/null 2>&1; then
+    print_status "Installing Node.js..."
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+    sudo apt install -y nodejs
 fi
-chmod +x install.sh
 
+# Run the installation script
 print_status "Starting iBilling installation..."
-
-# Run the main installation script
 if [ -n "$MYSQL_ROOT_PASSWORD" ] && [ -n "$ASTERISK_DB_PASSWORD" ]; then
     ./install.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
 elif [ -n "$ASTERISK_DB_PASSWORD" ]; then
     ./install.sh "$ASTERISK_DB_PASSWORD"
+else
+    print_error "No passwords provided to installation script"
+    exit 1
 fi
 
 # Check installation result
 if [ $? -eq 0 ]; then
-    print_status "iBilling installation completed successfully!"
+    print_status "iBilling core installation completed successfully!"
     
-    # Setup web components manually since setup-web.sh has issues
-    print_status "Setting up web frontend and Node.js..."
-    
-    # Create necessary directories
-    sudo mkdir -p /opt/billing/web
-    sudo mkdir -p /opt/billing/backend
-    
-    # Install Node.js if not present
-    if ! command -v node >/dev/null 2>&1; then
-        print_status "Installing Node.js..."
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-        sudo apt install -y nodejs
-    fi
-    
-    # Manual web setup instead of using problematic script
-    print_status "Setting up iBilling frontend manually..."
-    
-    # Create web directory if it doesn't exist
-    sudo mkdir -p /opt/billing/web
-    cd /opt/billing/web
-
-    # Remove existing files if any
-    sudo rm -rf ./* 2>/dev/null || true
-    sudo rm -rf ./.* 2>/dev/null || true
-
-    # Clone the repository
-    print_status "Cloning repository..."
-    if sudo git clone https://github.com/alffiegeorge/vox-charge-nexus-79095031.git .; then
-        print_status "Repository cloned successfully"
-    else
-        print_error "Failed to clone repository"
-        exit 1
-    fi
-
-    # Set permissions for the current user
-    current_user=$(whoami)
-    sudo chown -R "$current_user:$current_user" /opt/billing/web
-
     # Install npm dependencies
     print_status "Installing npm dependencies..."
     if npm install; then
@@ -331,16 +140,14 @@ if [ $? -eq 0 ]; then
     print_status "Configuring Nginx..."
     
     # Install Nginx if not present
-    sudo apt update
     sudo apt install -y nginx
     
     # Clean existing Nginx configurations
-    print_status "Cleaning existing Nginx configurations..."
     sudo rm -f /etc/nginx/sites-enabled/default
     sudo rm -f /etc/nginx/sites-enabled/ibilling
     sudo rm -f /etc/nginx/sites-available/ibilling
     
-    # Copy Nginx configuration from the downloaded files
+    # Copy Nginx configuration
     if [ -f "config/nginx-ibilling.conf" ]; then
         sudo cp "config/nginx-ibilling.conf" /etc/nginx/sites-available/ibilling
         print_status "Nginx configuration copied"
@@ -371,6 +178,8 @@ if [ $? -eq 0 ]; then
     print_status "Asterisk DB password: $ASTERISK_DB_PASSWORD"
     print_status "Please save these passwords securely!"
     print_status ""
+    print_status "Installation location: /opt/billing/web"
+    print_status ""
     print_status "Next steps:"
     print_status "1. Start the backend service: sudo systemctl start ibilling-backend"
     print_status "2. Access the web interface at http://your-server-ip"
@@ -384,9 +193,5 @@ else
     print_error "Installation failed. Check the logs above for details."
     exit 1
 fi
-
-# Clean up temporary files
-cd ~
-sudo rm -rf "$TEMP_DIR"
 
 print_status "Bootstrap completed successfully!"
