@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
 interface DID {
   number: string;
@@ -17,6 +18,13 @@ interface DID {
   type: string;
   customerId?: string;
   notes?: string;
+}
+
+interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
 }
 
 interface DIDFormProps {
@@ -37,9 +45,13 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
     customerId: "",
     notes: ""
   });
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
+    fetchCustomers();
+    
     if (editingDID) {
       setFormData({
         number: editingDID.number || "",
@@ -54,7 +66,32 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
     }
   }, [editingDID]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fetchCustomers = async () => {
+    setLoadingCustomers(true);
+    try {
+      const data = await apiClient.getCustomers() as any[];
+      const activeCustomers = data
+        .filter(customer => customer.status === 'active')
+        .map(customer => ({
+          id: customer.id,
+          name: customer.name,
+          email: customer.email,
+          status: customer.status
+        }));
+      setCustomers(activeCustomers);
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load customers",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.number || !formData.country || !formData.rate || !formData.type) {
@@ -66,50 +103,80 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
       return;
     }
 
-    if (editingDID) {
-      const updatedDID: DID = {
-        ...editingDID,
-        number: formData.number,
-        customer: formData.customer || "Unassigned",
-        country: formData.country,
-        rate: formData.rate,
-        type: formData.type,
-        status: formData.status,
-        customerId: formData.customerId,
-        notes: formData.notes
-      };
-
-      onDIDUpdated?.(updatedDID);
+    try {
+      // Find selected customer details
+      const selectedCustomer = customers.find(c => c.id === formData.customerId);
+      const customerName = selectedCustomer ? selectedCustomer.name : (formData.customer || "Unassigned");
       
-      toast({
-        title: "DID Updated",
-        description: `DID ${formData.number} has been updated successfully`,
-      });
-    } else {
-      const newDID: DID = {
-        number: formData.number,
-        customer: formData.customer || "Unassigned",
-        country: formData.country,
-        rate: formData.rate,
-        type: formData.type,
-        status: formData.status,
-        customerId: formData.customerId,
-        notes: formData.notes
-      };
+      // Determine status based on customer assignment
+      const didStatus = formData.customerId ? "Active" : "Available";
 
-      onDIDCreated?.(newDID);
+      if (editingDID) {
+        const updatedDID: DID = {
+          ...editingDID,
+          number: formData.number,
+          customer: customerName,
+          country: formData.country,
+          rate: formData.rate,
+          type: formData.type,
+          status: didStatus,
+          customerId: formData.customerId,
+          notes: formData.notes
+        };
+
+        // Call API to update DID assignment
+        await apiClient.updateDID(updatedDID);
+        onDIDUpdated?.(updatedDID);
+        
+        toast({
+          title: "DID Updated",
+          description: `DID ${formData.number} has been updated and ${formData.customerId ? `assigned to ${customerName}` : 'unassigned'}`,
+        });
+      } else {
+        const newDID: DID = {
+          number: formData.number,
+          customer: customerName,
+          country: formData.country,
+          rate: formData.rate,
+          type: formData.type,
+          status: didStatus,
+          customerId: formData.customerId,
+          notes: formData.notes
+        };
+
+        // Call API to create DID
+        await apiClient.createDID(newDID);
+        onDIDCreated?.(newDID);
+        
+        toast({
+          title: "DID Created",
+          description: `DID ${formData.number} has been created and ${formData.customerId ? `assigned to ${customerName}` : 'is available for assignment'}`,
+        });
+      }
       
+      onClose();
+    } catch (error) {
+      console.error('Error saving DID:', error);
       toast({
-        title: "DID Created",
-        description: `DID ${formData.number} has been created successfully`,
+        title: "Error",
+        description: `Failed to ${editingDID ? 'update' : 'create'} DID`,
+        variant: "destructive"
       });
     }
-    
-    onClose();
   };
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleCustomerChange = (customerId: string) => {
+    const selectedCustomer = customers.find(c => c.id === customerId);
+    setFormData(prev => ({
+      ...prev,
+      customerId: customerId,
+      customer: selectedCustomer ? selectedCustomer.name : "",
+      status: customerId ? "Active" : "Available"
+    }));
   };
 
   return (
@@ -118,7 +185,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
         <CardHeader>
           <CardTitle>{editingDID ? 'Edit DID' : 'Add New DID'}</CardTitle>
           <CardDescription>
-            {editingDID ? 'Update DID information' : 'Add a new Direct Inward Dialing number'}
+            {editingDID ? 'Update DID information and customer assignment' : 'Add a new Direct Inward Dialing number and assign to customer'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -173,29 +240,60 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="customer">Assign to Customer</Label>
-                <Input
-                  id="customer"
-                  value={formData.customer}
-                  onChange={(e) => handleInputChange("customer", e.target.value)}
-                  placeholder="Customer name or leave empty"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="customer">Assign to Customer</Label>
+              {loadingCustomers ? (
+                <div className="text-sm text-gray-500">Loading customers...</div>
+              ) : (
+                <Select 
+                  value={formData.customerId} 
+                  onValueChange={handleCustomerChange}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
+                    <SelectValue placeholder="Select customer (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Available">Available</SelectItem>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Suspended">Suspended</SelectItem>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {customers.map((customer) => (
+                      <SelectItem key={customer.id} value={customer.id}>
+                        {customer.name} ({customer.id})
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-              </div>
+              )}
+              {formData.customerId && (
+                <div className="text-sm text-blue-600 bg-blue-50 p-2 rounded">
+                  This DID will be assigned to the selected customer for inbound calls and available for their outbound calls.
+                </div>
+              )}
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select 
+                value={formData.status} 
+                onValueChange={(value) => handleInputChange("status", value)}
+                disabled={!!formData.customerId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Available">Available</SelectItem>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.customerId && (
+                <div className="text-xs text-gray-500">
+                  Status is automatically set to "Active" when assigned to a customer
+                </div>
+              )}
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
@@ -206,6 +304,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 rows={3}
               />
             </div>
+            
             <div className="flex justify-end space-x-2 pt-4">
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel

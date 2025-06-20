@@ -138,12 +138,13 @@ export class ApiClient {
     return this.request(`/api/cdr${query ? `?${query}` : ''}`);
   }
 
-  // DID Management
+  // DID Management with assignment functionality
   async getDIDs() {
     return this.request('/api/dids');
   }
 
   async createDID(did: any) {
+    console.log('Creating DID with assignment:', did);
     return this.request('/api/dids', {
       method: 'POST',
       body: JSON.stringify(did),
@@ -151,10 +152,31 @@ export class ApiClient {
   }
 
   async updateDID(did: any) {
+    console.log('Updating DID with assignment:', did);
     return this.request(`/api/dids/${did.number}`, {
       method: 'PUT',
       body: JSON.stringify(did),
     });
+  }
+
+  async assignDIDToCustomer(didNumber: string, customerId: string) {
+    console.log('Assigning DID to customer:', didNumber, customerId);
+    return this.request(`/api/dids/${didNumber}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ customerId }),
+    });
+  }
+
+  async unassignDID(didNumber: string) {
+    console.log('Unassigning DID:', didNumber);
+    return this.request(`/api/dids/${didNumber}/unassign`, {
+      method: 'POST',
+    });
+  }
+
+  async getCustomerDIDs(customerId: string) {
+    console.log('Getting DIDs for customer:', customerId);
+    return this.request(`/api/customers/${customerId}/dids`);
   }
 
   // Trunk Management

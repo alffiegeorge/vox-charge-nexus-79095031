@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/lib/api";
 import DIDForm from "@/components/DIDForm";
@@ -67,7 +68,7 @@ const DIDs = () => {
       setDids(prev => [...prev, newDID]);
       toast({
         title: "DID Created",
-        description: `DID ${newDID.number} has been created successfully`,
+        description: `DID ${newDID.number} has been created successfully${newDID.customerId ? ` and assigned to ${newDID.customer}` : ''}`,
       });
       fetchDIDs(); // Refresh from database
     } catch (error) {
@@ -89,7 +90,7 @@ const DIDs = () => {
       setEditingDID(null);
       toast({
         title: "DID Updated",
-        description: `DID ${updatedDID.number} has been updated successfully`,
+        description: `DID ${updatedDID.number} has been updated successfully${updatedDID.customerId ? ` and assigned to ${updatedDID.customer}` : ''}`,
       });
       fetchDIDs(); // Refresh from database
     } catch (error) {
@@ -97,6 +98,42 @@ const DIDs = () => {
       toast({
         title: "Error",
         description: "Failed to update DID",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleQuickAssign = async (didNumber: string, customerId: string) => {
+    try {
+      await apiClient.assignDIDToCustomer(didNumber, customerId);
+      toast({
+        title: "DID Assigned",
+        description: `DID ${didNumber} has been assigned successfully`,
+      });
+      fetchDIDs(); // Refresh from database
+    } catch (error) {
+      console.error('Error assigning DID:', error);
+      toast({
+        title: "Error",
+        description: "Failed to assign DID",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleQuickUnassign = async (didNumber: string) => {
+    try {
+      await apiClient.unassignDID(didNumber);
+      toast({
+        title: "DID Unassigned",
+        description: `DID ${didNumber} has been unassigned successfully`,
+      });
+      fetchDIDs(); // Refresh from database
+    } catch (error) {
+      console.error('Error unassigning DID:', error);
+      toast({
+        title: "Error",
+        description: "Failed to unassign DID",
         variant: "destructive",
       });
     }
@@ -116,6 +153,23 @@ const DIDs = () => {
     did.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
     did.country.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const getStatusBadge = (status: string, customerId?: string) => {
+    if (customerId && status === "Active") {
+      return <Badge className="bg-green-100 text-green-800">Assigned</Badge>;
+    }
+    
+    switch (status) {
+      case "Available":
+        return <Badge variant="secondary">Available</Badge>;
+      case "Active":
+        return <Badge className="bg-blue-100 text-blue-800">Active</Badge>;
+      case "Suspended":
+        return <Badge variant="destructive">Suspended</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
 
   if (loading) {
     return (
@@ -140,18 +194,43 @@ const DIDs = () => {
     );
   }
 
+  const assignedDids = dids.filter(did => did.customerId);
+  const availableDids = dids.filter(did => !did.customerId);
+
   return (
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">DID Management</h1>
-        <p className="text-gray-600">Manage Direct Inward Dialing numbers</p>
+        <p className="text-gray-600">Manage Direct Inward Dialing numbers and customer assignments</p>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bol
+            <div className="text-sm text-gray-600">Total DIDs</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-green-600">{assignedDids.length}</div>
+            <div className="text-sm text-gray-600">Assigned DIDs</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-blue-600">{availableDids.length}</div>
+            <div className="text-sm text-gray-600">Available DIDs</div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>DID Management</CardTitle>
           <CardDescription>
-            Manage Direct Inward Dialing numbers ({dids.length} DIDs loaded from database)
+            Manage Direct Inward Dialing numbers and customer assignments ({dids.length} DIDs loaded from database)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -193,7 +272,7 @@ const DIDs = () => {
                   <thead className="border-b bg-gray-50">
                     <tr>
                       <th className="text-left p-4">DID Number</th>
-                      <th className="text-left p-4">Customer</th>
+                      <th className="text-left p-4">Customer Assignment</th>
                       <th className="text-left p-4">Country</th>
                       <th className="text-left p-4">Monthly Rate</th>
                       <th className="text-left p-4">Type</th>
@@ -205,27 +284,51 @@ const DIDs = () => {
                     {filteredDids.map((did, index) => (
                       <tr key={index} className="border-b">
                         <td className="p-4 font-mono">{did.number}</td>
-                        <td className="p-4">{did.customer}</td>
+                        <td className="p-4">
+                          <div className="flex flex-col">
+                            <span className={did.customerId ? "font-medium" : "text-gray-500"}>
+                              {did.customer}
+                            </span>
+                            {did.customerId && (
+                              <span className="text-xs text-gray-500">ID: {did.customerId}</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4">{did.country}</td>
                         <td className="p-4">{did.rate}</td>
                         <td className="p-4">{did.type}</td>
                         <td className="p-4">
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            did.status === "Active" ? "bg-green-100 text-green-800" : 
-                            did.status === "Available" ? "bg-yellow-100 text-yellow-800" :
-                            "bg-red-100 text-red-800"
-                          }`}>
-                            {did.status}
-                          </span>
+                          {getStatusBadge(did.status, did.customerId)}
                         </td>
                         <td className="p-4">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleEditDID(did)}
-                          >
-                            Manage
-                          </Button>
+                          <div className="flex space-x-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleEditDID(did)}
+                            >
+                              Edit
+                            </Button>
+                            {did.customerId ? (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleQuickUnassign(did.number)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                Unassign
+                              </Button>
+                            ) : (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleEditDID(did)}
+                                className="text-green-600 hover:text-green-700"
+                              >
+                                Assign
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
