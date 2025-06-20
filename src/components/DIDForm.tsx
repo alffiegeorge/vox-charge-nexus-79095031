@@ -170,12 +170,15 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
   };
 
   const handleCustomerChange = (customerId: string) => {
-    const selectedCustomer = customers.find(c => c.id === customerId);
+    // Handle the "unassigned" case by checking if customerId is "unassigned"
+    const actualCustomerId = customerId === "unassigned" ? "" : customerId;
+    const selectedCustomer = customers.find(c => c.id === actualCustomerId);
+    
     setFormData(prev => ({
       ...prev,
-      customerId: customerId,
+      customerId: actualCustomerId,
       customer: selectedCustomer ? selectedCustomer.name : "",
-      status: customerId ? "Active" : "Available"
+      status: actualCustomerId ? "Active" : "Available"
     }));
   };
 
@@ -248,14 +251,14 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 <div className="text-sm text-gray-500">Loading customers...</div>
               ) : (
                 <Select 
-                  value={formData.customerId} 
+                  value={formData.customerId || "unassigned"} 
                   onValueChange={handleCustomerChange}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select customer (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Unassigned</SelectItem>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
                     {customers.map((customer) => (
                       <SelectItem key={customer.id} value={customer.id}>
                         {customer.name} ({customer.id})
