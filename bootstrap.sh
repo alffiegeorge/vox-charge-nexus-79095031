@@ -616,6 +616,23 @@ if command -v asterisk >/dev/null 2>&1; then
     fi
 fi
 
+# FINAL STEP: Run comprehensive PJSIP diagnostic and fix
+print_separator
+print_status "Running comprehensive PJSIP diagnostic and fix..."
+if [ -f "scripts/diagnose-and-fix-pjsip.sh" ]; then
+    chmod +x scripts/diagnose-and-fix-pjsip.sh
+    if sudo ./scripts/diagnose-and-fix-pjsip.sh "$ASTERISK_DB_PASSWORD" "c462881"; then
+        print_status "✅ PJSIP diagnostic and fix completed successfully!"
+    else
+        print_warning "⚠ PJSIP diagnostic encountered issues, but installation continues"
+        print_status "You can run the diagnostic manually later:"
+        print_status "sudo ./scripts/diagnose-and-fix-pjsip.sh $ASTERISK_DB_PASSWORD c462881"
+    fi
+else
+    print_error "❌ PJSIP diagnostic script not found"
+    print_warning "This may cause endpoint visibility issues"
+fi
+
 print_separator
 print_status "INSTALLATION COMPLETED SUCCESSFULLY"
 print_separator
@@ -648,6 +665,7 @@ echo "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
 echo -e "\n${GREEN}PJSIP endpoint management:${NC}"
 echo "- View endpoints: sudo asterisk -rx 'pjsip show endpoints'"
 echo "- If endpoints not visible, run: sudo ./scripts/fix-pjsip-sorcery.sh"
+echo "- Full diagnostic: sudo ./scripts/diagnose-and-fix-pjsip.sh $ASTERISK_DB_PASSWORD c462881"
 
 print_separator
 print_status "Bootstrap completed successfully!"
