@@ -1,4 +1,165 @@
--- iBilling Database Schema
+
+-- iBilling Database Schema - Updated for Asterisk 22 Compatibility
+-- PJSIP Realtime Tables for Asterisk 22
+-- These tables support Asterisk's realtime configuration for PJSIP
+
+-- PJSIP Endpoints table
+CREATE TABLE IF NOT EXISTS ps_endpoints (
+    id VARCHAR(40) NOT NULL,
+    transport VARCHAR(40) DEFAULT NULL,
+    aors VARCHAR(200) DEFAULT NULL,
+    auth VARCHAR(40) DEFAULT NULL,
+    context VARCHAR(40) DEFAULT NULL,
+    disallow VARCHAR(200) DEFAULT NULL,
+    allow VARCHAR(200) DEFAULT NULL,
+    direct_media ENUM('yes','no') DEFAULT 'yes',
+    connected_line_method ENUM('invite','reinvite','update') DEFAULT 'invite',
+    direct_media_method ENUM('invite','reinvite','update') DEFAULT 'invite',
+    direct_media_glare_mitigation ENUM('none','outgoing','incoming') DEFAULT 'none',
+    disable_direct_media_on_nat ENUM('yes','no') DEFAULT 'no',
+    dtmf_mode ENUM('rfc4733','inband','info','auto','auto_info') DEFAULT 'rfc4733',
+    external_media_address VARCHAR(40) DEFAULT NULL,
+    force_rport ENUM('yes','no') DEFAULT 'yes',
+    ice_support ENUM('yes','no') DEFAULT 'no',
+    identify_by ENUM('username','auth_username','endpoint') DEFAULT 'username',
+    mailboxes VARCHAR(40) DEFAULT NULL,
+    moh_suggest VARCHAR(40) DEFAULT NULL,
+    outbound_auth VARCHAR(40) DEFAULT NULL,
+    outbound_proxy VARCHAR(40) DEFAULT NULL,
+    rewrite_contact ENUM('yes','no') DEFAULT 'no',
+    rtp_ipv6 ENUM('yes','no') DEFAULT 'no',
+    rtp_symmetric ENUM('yes','no') DEFAULT 'no',
+    send_diversion ENUM('yes','no') DEFAULT 'yes',
+    send_pai ENUM('yes','no') DEFAULT 'no',
+    send_rpid ENUM('yes','no') DEFAULT 'no',
+    timers_min_se INT DEFAULT 90,
+    timers ENUM('forced','no','required','yes') DEFAULT 'yes',
+    timers_sess_expires INT DEFAULT 1800,
+    callerid VARCHAR(40) DEFAULT NULL,
+    callerid_privacy ENUM('allowed_not_screened','allowed_passed_screened','allowed_failed_screened','allowed','prohib_not_screened','prohib_passed_screened','prohib_failed_screened','prohib','unavailable') DEFAULT 'allowed_not_screened',
+    callerid_tag VARCHAR(40) DEFAULT NULL,
+    100rel ENUM('no','required','yes') DEFAULT 'yes',
+    aggregate_mwi ENUM('yes','no') DEFAULT 'yes',
+    trust_id_inbound ENUM('yes','no') DEFAULT 'no',
+    trust_id_outbound ENUM('yes','no') DEFAULT 'no',
+    use_ptime ENUM('yes','no') DEFAULT 'no',
+    use_avpf ENUM('yes','no') DEFAULT 'no',
+    media_encryption ENUM('no','sdes','dtls') DEFAULT 'no',
+    inband_progress ENUM('yes','no') DEFAULT 'no',
+    call_group VARCHAR(40) DEFAULT NULL,
+    pickup_group VARCHAR(40) DEFAULT NULL,
+    named_call_group VARCHAR(40) DEFAULT NULL,
+    named_pickup_group VARCHAR(40) DEFAULT NULL,
+    device_state_busy_at INT DEFAULT 0,
+    fax_detect ENUM('yes','no') DEFAULT 'no',
+    t38_udptl ENUM('yes','no') DEFAULT 'no',
+    t38_udptl_ec ENUM('none','fec','redundancy') DEFAULT 'none',
+    t38_udptl_maxdatagram INT DEFAULT 0,
+    t38_udptl_nat ENUM('yes','no') DEFAULT 'no',
+    t38_udptl_ipv6 ENUM('yes','no') DEFAULT 'no',
+    tone_zone VARCHAR(40) DEFAULT NULL,
+    language VARCHAR(40) DEFAULT NULL,
+    one_touch_recording ENUM('yes','no') DEFAULT 'no',
+    record_on_feature VARCHAR(40) DEFAULT 'automixmon',
+    record_off_feature VARCHAR(40) DEFAULT 'automixmon',
+    rtp_engine VARCHAR(40) DEFAULT 'asterisk',
+    allow_transfer ENUM('yes','no') DEFAULT 'yes',
+    user_eq_phone ENUM('yes','no') DEFAULT 'no',
+    moh_passthrough ENUM('yes','no') DEFAULT 'no',
+    sdp_owner VARCHAR(40) DEFAULT '-',
+    sdp_session VARCHAR(40) DEFAULT 'Asterisk',
+    tos_audio VARCHAR(10) DEFAULT '0',
+    tos_video VARCHAR(10) DEFAULT '0',
+    sub_min_expiry INT DEFAULT 0,
+    from_domain VARCHAR(40) DEFAULT NULL,
+    from_user VARCHAR(40) DEFAULT NULL,
+    mwi_from_user VARCHAR(40) DEFAULT NULL,
+    dtls_verify VARCHAR(40) DEFAULT 'no',
+    dtls_rekey VARCHAR(40) DEFAULT '0',
+    dtls_cert_file VARCHAR(200) DEFAULT NULL,
+    dtls_private_key VARCHAR(200) DEFAULT NULL,
+    dtls_cipher VARCHAR(200) DEFAULT NULL,
+    dtls_ca_file VARCHAR(200) DEFAULT NULL,
+    dtls_ca_path VARCHAR(200) DEFAULT NULL,
+    dtls_setup ENUM('active','passive','actpass') DEFAULT 'active',
+    srtp_tag_32 ENUM('yes','no') DEFAULT 'no',
+    media_address VARCHAR(40) DEFAULT NULL,
+    redirect_method ENUM('user','uri_core','uri_pjsip') DEFAULT 'user',
+    set_var TEXT DEFAULT NULL,
+    cos_audio VARCHAR(10) DEFAULT '0',
+    cos_video VARCHAR(10) DEFAULT '0',
+    message_context VARCHAR(40) DEFAULT NULL,
+    force_avp ENUM('yes','no') DEFAULT 'no',
+    media_use_received_transport ENUM('yes','no') DEFAULT 'no',
+    accountcode VARCHAR(40) DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY id (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+-- PJSIP Authentication table
+CREATE TABLE IF NOT EXISTS ps_auths (
+    id VARCHAR(40) NOT NULL,
+    auth_type ENUM('md5','userpass') DEFAULT 'userpass',
+    nonce_lifetime INT DEFAULT 32,
+    md5_cred VARCHAR(40) DEFAULT NULL,
+    password VARCHAR(80) DEFAULT NULL,
+    realm VARCHAR(40) DEFAULT NULL,
+    username VARCHAR(40) DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY id (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+-- PJSIP Address of Record (AOR) table - Fixed numeric data types
+CREATE TABLE IF NOT EXISTS ps_aors (
+    id VARCHAR(40) NOT NULL,
+    contact VARCHAR(40) DEFAULT NULL,
+    default_expiration INT DEFAULT 3600,
+    mailboxes VARCHAR(80) DEFAULT NULL,
+    max_contacts INT DEFAULT 1,                    -- Fixed: Changed from VARCHAR to INT
+    minimum_expiration INT DEFAULT 60,
+    remove_existing INT DEFAULT 0,                -- Fixed: Changed from VARCHAR to INT
+    qualify_frequency INT DEFAULT 0,              -- Fixed: Changed from VARCHAR to INT
+    authenticate_qualify ENUM('yes','no') DEFAULT 'no',
+    maximum_expiration INT DEFAULT 7200,
+    outbound_proxy VARCHAR(40) DEFAULT NULL,
+    support_path ENUM('yes','no') DEFAULT 'no',
+    qualify_timeout DECIMAL(4,3) DEFAULT 3.000,
+    voicemail_extension VARCHAR(40) DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY id (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+-- PJSIP Contacts table - Updated for Asterisk 22 compatibility
+CREATE TABLE IF NOT EXISTS ps_contacts (
+    id VARCHAR(255) NOT NULL,                     -- Fixed: Increased from VARCHAR(40) to VARCHAR(255)
+    uri VARCHAR(511) DEFAULT NULL,
+    expiration_time VARCHAR(40) DEFAULT NULL,
+    qualify_frequency VARCHAR(10) DEFAULT NULL,
+    outbound_proxy VARCHAR(40) DEFAULT NULL,
+    path TEXT,
+    user_agent VARCHAR(255) DEFAULT NULL,
+    qualify_timeout VARCHAR(10) DEFAULT NULL,
+    qualify_2xx_only ENUM('yes','no') NOT NULL DEFAULT 'no',  -- Fixed: Added missing column for Asterisk 22
+    reg_server VARCHAR(255) DEFAULT NULL,
+    authenticate_qualify ENUM('yes','no') DEFAULT NULL,
+    via_addr VARCHAR(40) DEFAULT NULL,
+    via_port VARCHAR(10) DEFAULT NULL,
+    call_id VARCHAR(255) DEFAULT NULL,
+    endpoint VARCHAR(40) DEFAULT NULL,
+    prune_on_boot ENUM('yes','no') DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY id (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+-- PJSIP Endpoint ID to IP mapping for endpoint discovery
+CREATE TABLE IF NOT EXISTS ps_endpoint_id_ips (
+    id VARCHAR(40) NOT NULL,
+    endpoint VARCHAR(40) NOT NULL,
+    `match` VARCHAR(80) NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY (endpoint) REFERENCES ps_endpoints(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 -- CDR Table for Call Detail Records
 CREATE TABLE IF NOT EXISTS cdr (
     id INT(11) NOT NULL AUTO_INCREMENT,
@@ -28,121 +189,23 @@ CREATE TABLE IF NOT EXISTS cdr (
     INDEX accountcode_idx (accountcode)
 );
 
--- SIP Users table for Realtime
-CREATE TABLE IF NOT EXISTS sipusers (
+-- Legacy SIP Credentials table (for compatibility)
+CREATE TABLE IF NOT EXISTS sip_credentials (
     id INT(11) NOT NULL AUTO_INCREMENT,
-    name VARCHAR(40) NOT NULL,
-    username VARCHAR(40) DEFAULT NULL,
-    secret VARCHAR(40) DEFAULT NULL,
-    md5secret VARCHAR(32) DEFAULT NULL,
-    context VARCHAR(40) DEFAULT NULL,
-    host VARCHAR(40) DEFAULT 'dynamic',
-    type ENUM('friend','user','peer') DEFAULT 'friend',
-    nat VARCHAR(40) DEFAULT 'yes',
-    port VARCHAR(40) DEFAULT NULL,
-    qualify VARCHAR(40) DEFAULT 'yes',
-    canreinvite VARCHAR(40) DEFAULT 'no',
-    rtptimeout VARCHAR(40) DEFAULT NULL,
-    rtpholdtimeout VARCHAR(40) DEFAULT NULL,
-    musiconhold VARCHAR(40) DEFAULT NULL,
-    cancallforward VARCHAR(40) DEFAULT 'yes',
-    dtmfmode VARCHAR(40) DEFAULT 'rfc2833',
-    insecure VARCHAR(40) DEFAULT NULL,
-    pickupgroup VARCHAR(40) DEFAULT NULL,
-    language VARCHAR(40) DEFAULT NULL,
-    disallow VARCHAR(40) DEFAULT 'all',
-    allow VARCHAR(40) DEFAULT 'ulaw,alaw,gsm',
-    accountcode VARCHAR(40) DEFAULT NULL,
-    amaflags VARCHAR(40) DEFAULT NULL,
-    callgroup VARCHAR(40) DEFAULT NULL,
-    callerid VARCHAR(40) DEFAULT NULL,
-    defaultuser VARCHAR(40) DEFAULT NULL,
-    fromuser VARCHAR(40) DEFAULT NULL,
-    fromdomain VARCHAR(40) DEFAULT NULL,
-    fullcontact VARCHAR(40) DEFAULT NULL,
-    regserver VARCHAR(40) DEFAULT NULL,
-    ipaddr VARCHAR(40) DEFAULT NULL,
-    regseconds INT(11) DEFAULT 0,
+    customer_id VARCHAR(20) NOT NULL,
+    sip_username VARCHAR(40) NOT NULL UNIQUE,
+    sip_password VARCHAR(40) NOT NULL,
+    sip_domain VARCHAR(100) NOT NULL DEFAULT '172.31.10.10',
+    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY name (name)
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    INDEX customer_idx (customer_id),
+    INDEX username_idx (sip_username)
 );
 
--- SIP Peers table (alternative to sipusers)
-CREATE TABLE IF NOT EXISTS sippeers (
-    id INT(11) NOT NULL AUTO_INCREMENT,
-    name VARCHAR(40) NOT NULL,
-    host VARCHAR(40) DEFAULT 'dynamic',
-    nat VARCHAR(40) DEFAULT 'yes',
-    type ENUM('friend','user','peer') DEFAULT 'friend',
-    accountcode VARCHAR(20) DEFAULT NULL,
-    amaflags VARCHAR(13) DEFAULT NULL,
-    callgroup VARCHAR(40) DEFAULT NULL,
-    callerid VARCHAR(40) DEFAULT NULL,
-    canreinvite VARCHAR(20) DEFAULT 'yes',
-    context VARCHAR(40) DEFAULT NULL,
-    defaultuser VARCHAR(40) DEFAULT NULL,
-    dtmfmode VARCHAR(20) DEFAULT NULL,
-    fromuser VARCHAR(40) DEFAULT NULL,
-    fromdomain VARCHAR(40) DEFAULT NULL,
-    insecure VARCHAR(40) DEFAULT NULL,
-    language VARCHAR(40) DEFAULT NULL,
-    mailbox VARCHAR(40) DEFAULT NULL,
-    md5secret VARCHAR(40) DEFAULT NULL,
-    deny VARCHAR(95) DEFAULT NULL,
-    permit VARCHAR(95) DEFAULT NULL,
-    mask VARCHAR(95) DEFAULT NULL,
-    musiconhold VARCHAR(40) DEFAULT NULL,
-    pickupgroup VARCHAR(40) DEFAULT NULL,
-    qualify VARCHAR(20) DEFAULT NULL,
-    regexten VARCHAR(40) DEFAULT NULL,
-    restrictcid VARCHAR(20) DEFAULT NULL,
-    rtptimeout VARCHAR(20) DEFAULT NULL,
-    rtpholdtimeout VARCHAR(20) DEFAULT NULL,
-    secret VARCHAR(40) DEFAULT NULL,
-    setvar VARCHAR(40) DEFAULT NULL,
-    disallow VARCHAR(200) DEFAULT 'all',
-    allow VARCHAR(200) DEFAULT 'g729,ilbc,gsm,ulaw,alaw',
-    fullcontact VARCHAR(80) NOT NULL DEFAULT '',
-    ipaddr VARCHAR(45) NOT NULL DEFAULT '',
-    port INT(5) NOT NULL DEFAULT 0,
-    regserver VARCHAR(40) DEFAULT NULL,
-    regseconds INT(11) NOT NULL DEFAULT 0,
-    lastms INT(11) NOT NULL DEFAULT 0,
-    username VARCHAR(40) NOT NULL DEFAULT '',
-    PRIMARY KEY (id),
-    UNIQUE KEY name (name),
-    KEY host (host,port)
-);
-
--- Voicemail table
-CREATE TABLE IF NOT EXISTS voicemail (
-    id INT(11) NOT NULL AUTO_INCREMENT,
-    customer_id VARCHAR(40) NOT NULL,
-    context VARCHAR(40) NOT NULL DEFAULT 'default',
-    mailbox VARCHAR(40) NOT NULL DEFAULT '0',
-    password VARCHAR(40) NOT NULL DEFAULT '0',
-    fullname VARCHAR(40) NOT NULL DEFAULT '',
-    email VARCHAR(40) DEFAULT NULL,
-    pager VARCHAR(40) DEFAULT NULL,
-    tz VARCHAR(40) DEFAULT 'central',
-    saycid VARCHAR(40) DEFAULT 'yes',
-    dialout VARCHAR(40) DEFAULT '',
-    callback VARCHAR(40) DEFAULT '',
-    review VARCHAR(40) DEFAULT 'no',
-    operator VARCHAR(40) DEFAULT 'yes',
-    envelope VARCHAR(40) DEFAULT 'no',
-    sayduration VARCHAR(40) DEFAULT 'no',
-    saydurationm VARCHAR(40) DEFAULT '1',
-    sendvoicemail VARCHAR(40) DEFAULT 'no',
-    delete_vm VARCHAR(40) DEFAULT 'no',
-    nextaftercmd VARCHAR(40) DEFAULT 'yes',
-    forcename VARCHAR(40) DEFAULT 'no',
-    forcegreetings VARCHAR(40) DEFAULT 'no',
-    hidefromdir VARCHAR(40) DEFAULT 'yes',
-    stamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    KEY mailbox_context (mailbox, context)
-);
+-- ... keep existing code (billing related tables)
 
 -- Billing related tables
 CREATE TABLE IF NOT EXISTS customers (
@@ -382,7 +445,7 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('low_balance_warning', '10.00', 'number', 'billing', 'Low balance warning threshold'),
 ('auto_suspend', 'false', 'boolean', 'billing', 'Auto-suspend accounts on zero balance'),
 ('email_notifications', 'true', 'boolean', 'billing', 'Enable email notifications'),
-('asterisk_server_ip', '192.168.1.100', 'string', 'asterisk', 'Asterisk server IP address'),
+('asterisk_server_ip', '172.31.10.10', 'string', 'asterisk', 'Asterisk server IP address'),
 ('ami_port', '5038', 'string', 'asterisk', 'Asterisk AMI port'),
 ('ami_username', 'admin', 'string', 'asterisk', 'Asterisk AMI username'),
 ('session_timeout', '30', 'number', 'security', 'Session timeout in minutes'),
@@ -391,7 +454,7 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('login_attempt_limit', 'true', 'boolean', 'security', 'Enable login attempt limiting'),
 ('max_login_attempts', '5', 'number', 'security', 'Maximum login attempts before lockout');
 
--- Insert sample data without qr_code_enabled column
+-- Insert sample data
 INSERT IGNORE INTO customers (id, name, email, phone, type, balance, status) VALUES
 ('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'Prepaid', 125.50, 'Active'),
 ('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'Postpaid', -45.20, 'Active'),
