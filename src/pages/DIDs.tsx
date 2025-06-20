@@ -208,7 +208,7 @@ const DIDs = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bol
+            <div className="text-2xl font-bold text-gray-900">{dids.length}</div>
             <div className="text-sm text-gray-600">Total DIDs</div>
           </CardContent>
         </Card>
