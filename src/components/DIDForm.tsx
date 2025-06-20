@@ -206,11 +206,12 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               </div>
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
-                <Select value={formData.country} onValueChange={(value) => handleInputChange("country", value)}>
+                <Select value={formData.country || "placeholder"} onValueChange={(value) => handleInputChange("country", value === "placeholder" ? "" : value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select country" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="placeholder" disabled>Select country</SelectItem>
                     <SelectItem value="USA">USA</SelectItem>
                     <SelectItem value="UK">UK</SelectItem>
                     <SelectItem value="Germany">Germany</SelectItem>
@@ -221,11 +222,12 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               </div>
               <div className="space-y-2">
                 <Label htmlFor="type">DID Type *</Label>
-                <Select value={formData.type} onValueChange={(value) => handleInputChange("type", value)}>
+                <Select value={formData.type || "placeholder"} onValueChange={(value) => handleInputChange("type", value === "placeholder" ? "" : value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="placeholder" disabled>Select type</SelectItem>
                     <SelectItem value="Local">Local</SelectItem>
                     <SelectItem value="International">International</SelectItem>
                     <SelectItem value="Toll-Free">Toll-Free</SelectItem>
@@ -277,7 +279,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
               <Select 
-                value={formData.status} 
+                value={formData.status || "Available"} 
                 onValueChange={(value) => handleInputChange("status", value)}
                 disabled={!!formData.customerId}
               >
