@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS ps_endpoints (
     dtmf_mode ENUM('rfc4733','inband','info','auto','auto_info') DEFAULT 'rfc4733',
     external_media_address VARCHAR(40),
     force_rport ENUM('yes','no') DEFAULT 'yes',
-    ice_support ENUM('yes','no') DEFAULT 'no',
+    ice_support ENUM('yes','no') DEFAULT 'yes',
     identify_by ENUM('username','auth_username','endpoint') DEFAULT 'username',
     mailboxes VARCHAR(40),
     moh_suggest VARCHAR(40),
@@ -269,8 +269,8 @@ CREATE TABLE IF NOT EXISTS ps_endpoints (
     rtp_ipv6 ENUM('yes','no') DEFAULT 'no',
     rtp_symmetric ENUM('yes','no') DEFAULT 'no',
     send_diversion ENUM('yes','no') DEFAULT 'yes',
-    send_pai ENUM('yes','no') DEFAULT 'no',
-    send_rpid ENUM('yes','no') DEFAULT 'no',
+    send_pai ENUM('yes','no') DEFAULT 'yes',
+    send_rpid ENUM('yes','no') DEFAULT 'yes',
     timers_min_se INTEGER DEFAULT 90,
     timers ENUM('forced','no','required','yes') DEFAULT 'yes',
     timers_sess_expires INTEGER DEFAULT 1800,
@@ -547,6 +547,24 @@ else
     print_warning "⚠ Realtime authentication fix script not found"
 fi
 
+# CRITICAL FIX: Apply PJSIP sorcery configuration fix
+print_separator
+print_status "Applying PJSIP sorcery configuration fix..."
+if [ -f "scripts/fix-pjsip-sorcery.sh" ]; then
+    chmod +x scripts/fix-pjsip-sorcery.sh
+    if sudo ./scripts/fix-pjsip-sorcery.sh; then
+        print_status "✅ PJSIP sorcery configuration fixed successfully!"
+        print_status "Endpoints should now be visible in Asterisk"
+    else
+        print_error "❌ PJSIP sorcery fix failed"
+        print_warning "You may need to run this manually:"
+        echo -e "sudo ./scripts/fix-pjsip-sorcery.sh"
+    fi
+else
+    print_error "❌ PJSIP sorcery fix script not found"
+    print_warning "This may cause endpoint visibility issues"
+fi
+
 # Run system checks
 if [ -f "scripts/system-checks.sh" ]; then
     print_status "Running system-checks.sh..."
@@ -576,11 +594,11 @@ if [ -f "scripts/add-sample-dids.sh" ]; then
     MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" DB_PASSWORD="$ASTERISK_DB_PASSWORD" ./scripts/add-sample-dids.sh
 fi
 
-# Restart Asterisk to load new configurations
+# Final Asterisk restart and verification
 if command -v asterisk >/dev/null 2>&1; then
-    print_status "Restarting Asterisk to load configurations..."
+    print_status "Final Asterisk restart to ensure all configurations are loaded..."
     sudo systemctl restart asterisk >/dev/null 2>&1
-    sleep 5
+    sleep 10
     
     # Test PJSIP endpoints after restart
     print_status "Testing PJSIP configuration..."
@@ -588,10 +606,13 @@ if command -v asterisk >/dev/null 2>&1; then
     sleep 3
     
     endpoints_output=$(sudo asterisk -rx "pjsip show endpoints" 2>/dev/null)
-    if echo "$endpoints_output" | grep -q "Endpoint:" || echo "$endpoints_output" | grep -q "No objects found"; then
+    if echo "$endpoints_output" | grep -q "Endpoint:" || echo "$endpoints_output" | grep -q "c[0-9]"; then
+        print_status "✅ PJSIP endpoints are visible and working correctly"
+    elif echo "$endpoints_output" | grep -q "No objects found"; then
         print_status "✓ PJSIP is responding (ready for endpoint creation)"
     else
         print_warning "⚠ PJSIP may have configuration issues"
+        echo "PJSIP output: $endpoints_output"
     fi
 fi
 
@@ -623,6 +644,10 @@ echo "- Asterisk status: sudo systemctl status asterisk"
 echo -e "\n${GREEN}ODBC connection status can be checked with:${NC}"
 echo "- sudo asterisk -rx 'odbc show all'"
 echo "- isql -v asterisk-connector asterisk ${ASTERISK_DB_PASSWORD}"
+
+echo -e "\n${GREEN}PJSIP endpoint management:${NC}"
+echo "- View endpoints: sudo asterisk -rx 'pjsip show endpoints'"
+echo "- If endpoints not visible, run: sudo ./scripts/fix-pjsip-sorcery.sh"
 
 print_separator
 print_status "Bootstrap completed successfully!"
