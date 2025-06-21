@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -212,33 +211,32 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
                 <Select 
-                  value={getSafeSelectValue(formData.country, "country-placeholder")} 
-                  onValueChange={(value) => handleInputChange("country", value === "country-placeholder" ? "" : value)}
+                  value={formData.country || undefined} 
+                  onValueChange={(value) => handleInputChange("country", value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select country" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="country-placeholder" disabled>Select country</SelectItem>
                     <SelectItem value="USA">USA</SelectItem>
                     <SelectItem value="UK">UK</SelectItem>
                     <SelectItem value="Germany">Germany</SelectItem>
                     <SelectItem value="France">France</SelectItem>
                     <SelectItem value="Canada">Canada</SelectItem>
+                    <SelectItem value="Vanuatu">Vanuatu</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="type">DID Type *</Label>
                 <Select 
-                  value={getSafeSelectValue(formData.type, "type-placeholder")} 
-                  onValueChange={(value) => handleInputChange("type", value === "type-placeholder" ? "" : value)}
+                  value={formData.type || undefined} 
+                  onValueChange={(value) => handleInputChange("type", value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="type-placeholder" disabled>Select type</SelectItem>
                     <SelectItem value="Local">Local</SelectItem>
                     <SelectItem value="International">International</SelectItem>
                     <SelectItem value="Toll-Free">Toll-Free</SelectItem>
@@ -264,7 +262,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 <div className="text-sm text-gray-500">Loading customers...</div>
               ) : (
                 <Select 
-                  value={getSafeSelectValue(formData.customerId, "unassigned")} 
+                  value={formData.customerId || "unassigned"} 
                   onValueChange={handleCustomerChange}
                 >
                   <SelectTrigger>
@@ -290,7 +288,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
               <Select 
-                value={getSafeSelectValue(formData.status, "Available")} 
+                value={formData.status || "Available"} 
                 onValueChange={(value) => handleInputChange("status", value)}
                 disabled={!!formData.customerId}
               >
