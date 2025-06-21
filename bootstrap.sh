@@ -70,6 +70,27 @@ emergency_mariadb_reset() {
     fi
 }
 
+# Function to run complete database schema fix
+fix_complete_database_schema() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
+    
+    if [ -f "scripts/fix-database-schema-complete.sh" ]; then
+        print_status "Running complete database schema fix..."
+        chmod +x scripts/fix-database-schema-complete.sh
+        if ./scripts/fix-database-schema-complete.sh "$mysql_root_password" "$asterisk_db_password"; then
+            print_status "✅ Complete database schema fix completed successfully!"
+            return 0
+        else
+            print_error "❌ Complete database schema fix failed"
+            return 1
+        fi
+    else
+        print_error "fix-database-schema-complete.sh script not found"
+        return 1
+    fi
+}
+
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
     print_error "Please do not run this script as root"
@@ -182,21 +203,23 @@ print_status "Method 1: Attempting MariaDB password reset..."
 if reset_mariadb_password "$MYSQL_ROOT_PASSWORD"; then
     print_status "✓ MariaDB password reset successful!"
     
-    # Create asterisk database and user
-    print_status "Creating asterisk database and user..."
-    mysql -u root -p"$MYSQL_ROOT_PASSWORD" <<EOF >/dev/null 2>&1
-CREATE DATABASE IF NOT EXISTS asterisk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'asterisk'@'localhost' IDENTIFIED BY '$ASTERISK_DB_PASSWORD';
-GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost';
-FLUSH PRIVILEGES;
-EOF
+    # CRITICAL: Run complete database schema fix instead of basic setup
+    print_separator
+    print_status "Setting up complete database schema with fix..."
     
-    if [ $? -eq 0 ]; then
-        print_status "✓ Asterisk database and user created successfully"
+    if fix_complete_database_schema "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+        print_status "✅ Complete database schema setup successful!"
     else
-        print_error "Failed to create asterisk database, trying emergency reset..."
+        print_error "❌ Complete database schema setup failed, trying emergency reset..."
         if emergency_mariadb_reset "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
             print_status "✓ Emergency reset successful!"
+            # Try the complete schema fix again after emergency reset
+            if fix_complete_database_schema "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+                print_status "✅ Complete database schema setup successful after emergency reset!"
+            else
+                print_error "❌ Database setup failed even after emergency reset"
+                exit 1
+            fi
         else
             print_error "All database setup methods failed"
             exit 1
@@ -206,202 +229,17 @@ else
     print_warning "Password reset failed, trying emergency reset..."
     if emergency_mariadb_reset "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
         print_status "✓ Emergency reset successful!"
+        # Run complete database schema fix after emergency reset
+        if fix_complete_database_schema "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"; then
+            print_status "✅ Complete database schema setup successful!"
+        else
+            print_error "❌ Database setup failed after emergency reset"
+            exit 1
+        fi
     else
         print_error "All database setup methods failed"
         exit 1
     fi
-fi
-
-print_separator
-print_status "Setting up database schema..."
-mysql -u root -p"$MYSQL_ROOT_PASSWORD" asterisk <<EOF >/dev/null 2>&1
--- Create customers table if it doesn't exist
-CREATE TABLE IF NOT EXISTS customers (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    phone VARCHAR(20),
-    address TEXT,
-    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
-    balance DECIMAL(10,2) DEFAULT 0.00,
-    credit_limit DECIMAL(10,2) DEFAULT 0.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Create sip_credentials table for endpoint management
-CREATE TABLE IF NOT EXISTS sip_credentials (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id VARCHAR(50) NOT NULL UNIQUE,
-    sip_username VARCHAR(50) NOT NULL UNIQUE,
-    sip_password VARCHAR(100) NOT NULL,
-    sip_domain VARCHAR(100) NOT NULL,
-    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
-
--- Create PJSIP realtime tables for Asterisk
-CREATE TABLE IF NOT EXISTS ps_endpoints (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    transport VARCHAR(40),
-    aors VARCHAR(200),
-    auth VARCHAR(40),
-    context VARCHAR(40),
-    disallow VARCHAR(200),
-    allow VARCHAR(200),
-    direct_media ENUM('yes','no') DEFAULT 'no',
-    connected_line_method ENUM('invite','reinvite','update') DEFAULT 'invite',
-    direct_media_method ENUM('invite','reinvite','update') DEFAULT 'invite',
-    direct_media_glare_mitigation ENUM('none','outgoing','incoming') DEFAULT 'none',
-    disable_direct_media_on_nat ENUM('yes','no') DEFAULT 'no',
-    dtmf_mode ENUM('rfc4733','inband','info','auto','auto_info') DEFAULT 'rfc4733',
-    external_media_address VARCHAR(40),
-    force_rport ENUM('yes','no') DEFAULT 'yes',
-    ice_support ENUM('yes','no') DEFAULT 'yes',
-    identify_by ENUM('username','auth_username','endpoint') DEFAULT 'username',
-    mailboxes VARCHAR(40),
-    moh_suggest VARCHAR(40),
-    outbound_auth VARCHAR(40),
-    outbound_proxy VARCHAR(40),
-    rewrite_contact ENUM('yes','no') DEFAULT 'no',
-    rtp_ipv6 ENUM('yes','no') DEFAULT 'no',
-    rtp_symmetric ENUM('yes','no') DEFAULT 'no',
-    send_diversion ENUM('yes','no') DEFAULT 'yes',
-    send_pai ENUM('yes','no') DEFAULT 'yes',
-    send_rpid ENUM('yes','no') DEFAULT 'yes',
-    timers_min_se INTEGER DEFAULT 90,
-    timers ENUM('forced','no','required','yes') DEFAULT 'yes',
-    timers_sess_expires INTEGER DEFAULT 1800,
-    callerid VARCHAR(40),
-    from_user VARCHAR(40),
-    from_domain VARCHAR(40),
-    sub_min_expiry INTEGER DEFAULT 0,
-    from_uri VARCHAR(40),
-    mwi_from_user VARCHAR(40),
-    dtls_verify ENUM('yes','no','fingerprint','certificate') DEFAULT 'no',
-    dtls_rekey INTEGER DEFAULT 0,
-    dtls_cert_file VARCHAR(200),
-    dtls_private_key VARCHAR(200),
-    dtls_cipher VARCHAR(200),
-    dtls_ca_file VARCHAR(200),
-    dtls_ca_path VARCHAR(200),
-    dtls_setup ENUM('active','passive','actpass') DEFAULT 'active',
-    srtp_tag_32 ENUM('yes','no') DEFAULT 'no',
-    media_address VARCHAR(40),
-    redirect_method ENUM('user','uri_core','uri_pjsip') DEFAULT 'user',
-    set_var TEXT,
-    cos_audio INTEGER DEFAULT 0,
-    cos_video INTEGER DEFAULT 0,
-    message_context VARCHAR(40),
-    accountcode VARCHAR(40),
-    trust_id_inbound ENUM('yes','no') DEFAULT 'no',
-    trust_id_outbound ENUM('yes','no') DEFAULT 'no',
-    use_ptime ENUM('yes','no') DEFAULT 'no',
-    use_avpf ENUM('yes','no') DEFAULT 'no',
-    media_encryption ENUM('no','sdes','dtls') DEFAULT 'no',
-    inband_progress ENUM('yes','no') DEFAULT 'no',
-    call_group VARCHAR(40),
-    pickup_group VARCHAR(40),
-    named_call_group VARCHAR(40),
-    named_pickup_group VARCHAR(40),
-    device_state_busy_at INTEGER DEFAULT 0,
-    fax_detect ENUM('yes','no') DEFAULT 'no',
-    t38_udptl ENUM('yes','no') DEFAULT 'no',
-    t38_udptl_ec ENUM('none','fec','redundancy') DEFAULT 'none',
-    t38_udptl_maxdatagram INTEGER DEFAULT 0,
-    t38_udptl_nat ENUM('yes','no') DEFAULT 'no',
-    t38_udptl_ipv6 ENUM('yes','no') DEFAULT 'no',
-    tone_zone VARCHAR(40),
-    language VARCHAR(40),
-    one_touch_recording ENUM('yes','no') DEFAULT 'no',
-    record_on_feature VARCHAR(40),
-    record_off_feature VARCHAR(40),
-    rtp_engine VARCHAR(40),
-    allow_transfer ENUM('yes','no') DEFAULT 'yes',
-    allow_subscribe ENUM('yes','no') DEFAULT 'yes',
-    sdp_owner VARCHAR(40),
-    sdp_session VARCHAR(40),
-    tos_audio INTEGER DEFAULT 0,
-    tos_video INTEGER DEFAULT 0,
-    bind_rtp_to_media_address ENUM('yes','no') DEFAULT 'no',
-    voicemail_extension VARCHAR(40)
-);
-
-CREATE TABLE IF NOT EXISTS ps_auths (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    auth_type ENUM('md5','userpass') DEFAULT 'userpass',
-    nonce_lifetime INTEGER DEFAULT 32,
-    md5_cred VARCHAR(40),
-    password VARCHAR(80),
-    realm VARCHAR(40),
-    username VARCHAR(40)
-);
-
-CREATE TABLE IF NOT EXISTS ps_aors (
-    id VARCHAR(40) NOT NULL PRIMARY KEY,
-    contact VARCHAR(255),
-    default_expiration INTEGER DEFAULT 3600,
-    mailboxes VARCHAR(80),
-    max_contacts INTEGER DEFAULT 1,
-    minimum_expiration INTEGER DEFAULT 60,
-    remove_existing ENUM('yes','no') DEFAULT 'no',
-    qualify_frequency INTEGER DEFAULT 0,
-    authenticate_qualify ENUM('yes','no') DEFAULT 'no',
-    maximum_expiration INTEGER DEFAULT 7200,
-    outbound_proxy VARCHAR(40),
-    support_path ENUM('yes','no') DEFAULT 'no',
-    qualify_timeout DECIMAL(3,2) DEFAULT 3.0,
-    voicemail_extension VARCHAR(40)
-);
-
-CREATE TABLE IF NOT EXISTS ps_contacts (
-    id VARCHAR(255) NOT NULL PRIMARY KEY,
-    uri VARCHAR(255),
-    expiration_time BIGINT,
-    qualify_frequency INTEGER,
-    outbound_proxy VARCHAR(40),
-    path TEXT,
-    user_agent VARCHAR(255),
-    qualify_timeout DECIMAL(3,2),
-    reg_server VARCHAR(255),
-    authenticate_qualify ENUM('yes','no') DEFAULT 'no',
-    via_addr VARCHAR(40),
-    via_port INTEGER DEFAULT 0,
-    call_id VARCHAR(255),
-    endpoint VARCHAR(40),
-    prune_on_boot ENUM('yes','no') DEFAULT 'no'
-);
-
--- Create users table for authentication
-CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    role ENUM('admin', 'customer', 'operator') NOT NULL DEFAULT 'customer',
-    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Insert default admin user (password: admin123)
-INSERT IGNORE INTO users (username, password, email, role, status) VALUES 
-('admin', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@ibilling.local', 'admin', 'active');
-
--- Insert simple customer data without problematic columns
-INSERT IGNORE INTO customers (id, name, email, phone, status, balance) VALUES
-('C001', 'John Doe', 'john@example.com', '+1-555-0123', 'active', 125.50),
-('C002', 'Jane Smith', 'jane@example.com', '+1-555-0456', 'active', -45.20),
-('C003', 'Bob Johnson', 'bob@example.com', '+1-555-0789', 'suspended', 0.00);
-EOF
-
-if [ $? -eq 0 ]; then
-    print_status "✓ Database schema created successfully"
-else
-    print_error "Failed to create database schema"
-    exit 1
 fi
 
 # Export passwords for use by other scripts
@@ -420,11 +258,9 @@ fi
 print_separator
 print_status "Running additional setup scripts..."
 
-# Run setup-database script if it exists
+# Run setup-database script if it exists (will be skipped since schema is already complete)
 if [ -f "scripts/setup-database.sh" ]; then
-    print_status "Running setup-database.sh..."
-    chmod +x scripts/setup-database.sh
-    ./scripts/setup-database.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1
+    print_status "Skipping setup-database.sh (complete schema already applied)..."
 fi
 
 # Run setup-odbc script if it exists
@@ -521,8 +357,7 @@ else
     sudo journalctl -u ibilling-backend --no-pager -n 20
 fi
 
-print_separator
-print_status "Fixing realtime authentication..."
+# Fix realtime authentication
 if [ -f "scripts/fix-realtime-auth.sh" ]; then
     chmod +x scripts/fix-realtime-auth.sh
     if ./scripts/fix-realtime-auth.sh "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD" >/dev/null 2>&1; then
