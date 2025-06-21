@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -168,9 +169,9 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleCustomerChange = (customerId: string) => {
-    // Handle the "unassigned" case by checking if customerId is "unassigned"
-    const actualCustomerId = customerId === "unassigned" ? "" : customerId;
+  const handleCustomerChange = (value: string) => {
+    // Handle the "unassigned" case by checking if value is "unassigned"
+    const actualCustomerId = value === "unassigned" ? "" : value;
     const selectedCustomer = customers.find(c => c.id === actualCustomerId);
     
     setFormData(prev => ({
@@ -179,11 +180,6 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
       customer: selectedCustomer ? selectedCustomer.name : "",
       status: actualCustomerId ? "Active" : "Available"
     }));
-  };
-
-  // Helper function to get safe Select value (never empty string)
-  const getSafeSelectValue = (value: string, defaultValue: string) => {
-    return value || defaultValue;
   };
 
   return (
@@ -211,7 +207,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
                 <Select 
-                  value={formData.country || undefined} 
+                  value={formData.country || ""} 
                   onValueChange={(value) => handleInputChange("country", value)}
                 >
                   <SelectTrigger>
@@ -230,7 +226,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               <div className="space-y-2">
                 <Label htmlFor="type">DID Type *</Label>
                 <Select 
-                  value={formData.type || undefined} 
+                  value={formData.type || ""} 
                   onValueChange={(value) => handleInputChange("type", value)}
                 >
                   <SelectTrigger>
