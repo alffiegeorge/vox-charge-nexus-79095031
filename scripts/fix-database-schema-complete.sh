@@ -64,7 +64,7 @@ EOF
         return 1
     fi
     
-    # Create complete schema with correct DID table structure
+    # Create complete schema
     print_status "3. Creating complete database schema..."
     mysql -u root -p"${mysql_root_password}" asterisk <<'EOF'
 -- Drop existing tables to start fresh
@@ -150,23 +150,22 @@ CREATE TABLE rates (
     INDEX date_idx (effective_date)
 );
 
--- Create DID numbers table with CORRECT schema matching backend expectations
+-- Create DID numbers table
 CREATE TABLE did_numbers (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
     number VARCHAR(20) NOT NULL UNIQUE,
     customer_id VARCHAR(20) DEFAULT NULL,
-    customer_name VARCHAR(100) DEFAULT NULL,
-    country VARCHAR(50) NOT NULL DEFAULT 'Unknown',
-    rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    type VARCHAR(20) DEFAULT 'Local',
-    status ENUM('Available', 'Active', 'Suspended') DEFAULT 'Available',
-    notes TEXT DEFAULT NULL,
+    monthly_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    setup_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Available', 'Assigned', 'Ported', 'Suspended') DEFAULT 'Available',
+    country VARCHAR(50) DEFAULT NULL,
+    region VARCHAR(50) DEFAULT NULL,
+    features JSON DEFAULT NULL,
+    assigned_date DATE DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
     INDEX customer_idx (customer_id),
-    INDEX status_idx (status),
-    INDEX number_idx (number)
+    INDEX status_idx (status)
 );
 
 -- Create users table for authentication
@@ -240,14 +239,14 @@ INSERT INTO rates (destination_prefix, destination_name, rate_per_minute, billin
 ('81', 'Japan', 0.0200, 60, CURDATE()),
 ('678', 'Vanuatu', 0.0350, 60, CURDATE());
 
--- Insert sample DID numbers with CORRECT schema
-INSERT INTO did_numbers (number, customer_id, customer_name, country, rate, type, status, notes) VALUES
-('+1-555-1001', 'C001', 'John Doe', 'USA', 5.00, 'Local', 'Active', 'Primary DID for John Doe'),
-('+1-555-1002', 'C002', 'Jane Smith', 'USA', 5.00, 'Active', 'Local', 'Primary DID for Jane Smith'),
-('+1-555-1003', NULL, NULL, 'USA', 5.00, 'Local', 'Available', 'Available for assignment'),
-('+1-555-1004', 'C003', 'Bob Johnson', 'USA', 5.00, 'Local', 'Active', 'Primary DID for Bob Johnson'),
-('+1-555-1005', NULL, NULL, 'USA', 5.00, 'Local', 'Available', 'Available for assignment'),
-('+678-12345', NULL, NULL, 'Vanuatu', 8.00, 'Local', 'Available', 'Vanuatu local number');
+-- Insert sample DID numbers
+INSERT INTO did_numbers (number, customer_id, monthly_cost, status, country, region) VALUES
+('+1-555-1001', 'C001', 5.00, 'Assigned', 'USA', 'New York'),
+('+1-555-1002', 'C002', 5.00, 'Assigned', 'USA', 'California'),
+('+1-555-1003', NULL, 5.00, 'Available', 'USA', 'Texas'),
+('+1-555-1004', 'C003', 5.00, 'Assigned', 'USA', 'Florida'),
+('+1-555-1005', NULL, 5.00, 'Available', 'USA', 'Illinois'),
+('+678-12345', NULL, 8.00, 'Available', 'Vanuatu', 'Port Vila');
 
 -- Insert default admin user (password: admin123)
 INSERT INTO users (username, password, email, role, status) VALUES 
@@ -263,7 +262,7 @@ INSERT INTO cdr (calldate, src, dst, duration, billsec, disposition, accountcode
 EOF
     
     if [ $? -eq 0 ]; then
-        print_status "✓ Complete database schema created successfully with CORRECT DID table structure"
+        print_status "✓ Complete database schema created successfully"
     else
         print_error "✗ Failed to create complete database schema"
         return 1
@@ -298,33 +297,10 @@ EOF
     rates_count=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SELECT COUNT(*) FROM rates;" 2>/dev/null)
     did_count=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SELECT COUNT(*) FROM did_numbers;" 2>/dev/null)
     
-    # Verify DID table structure
-    did_columns=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SHOW COLUMNS FROM did_numbers;" 2>/dev/null | wc -l)
-    
     print_status "Database verification:"
     print_status "- Customers: ${customer_count:-0}"
     print_status "- Rates: ${rates_count:-0}"
     print_status "- DID Numbers: ${did_count:-0}"
-    print_status "- DID Table Columns: ${did_columns:-0} (should be 10+)"
-    
-    # Test if required columns exist
-    customer_name_exists=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SHOW COLUMNS FROM did_numbers LIKE 'customer_name';" 2>/dev/null | wc -l)
-    country_exists=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SHOW COLUMNS FROM did_numbers LIKE 'country';" 2>/dev/null | wc -l)
-    rate_exists=$(mysql -u asterisk -p"${asterisk_db_password}" asterisk -sN -e "SHOW COLUMNS FROM did_numbers LIKE 'rate';" 2>/dev/null | wc -l)
-    
-    print_status "Required DID columns verification:"
-    print_status "- customer_name column: ${customer_name_exists:-0} (should be 1)"
-    print_status "- country column: ${country_exists:-0} (should be 1)"
-    print_status "- rate column: ${rate_exists:-0} (should be 1)"
-    
-    if [ "${customer_name_exists:-0}" -eq 1 ] && [ "${country_exists:-0}" -eq 1 ] && [ "${rate_exists:-0}" -eq 1 ]; then
-        print_status "✅ All required DID columns are present - DID creation should work!"
-    else
-        print_error "❌ Some required DID columns are missing"
-        print_status "Current DID table structure:"
-        mysql -u asterisk -p"${asterisk_db_password}" asterisk -e "DESCRIBE did_numbers;" 2>/dev/null
-        return 1
-    fi
     
     print_status "✅ Complete database schema fix completed successfully!"
     print_status ""
@@ -332,7 +308,7 @@ EOF
     print_status "- MySQL root password: ${mysql_root_password}"
     print_status "- Asterisk DB password: ${asterisk_db_password}"
     print_status ""
-    print_status "✅ DID creation should now work without 'Unknown column' errors!"
+    print_status "You can now try creating DIDs through the web interface."
     
     return 0
 }

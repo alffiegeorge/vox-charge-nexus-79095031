@@ -1,3 +1,4 @@
+
 -- iBilling Database Schema - Updated for Asterisk 22 Compatibility
 -- PJSIP Realtime Tables for Asterisk 22
 -- These tables support Asterisk's realtime configuration for PJSIP
@@ -204,6 +205,8 @@ CREATE TABLE IF NOT EXISTS sip_credentials (
     INDEX username_idx (sip_username)
 );
 
+-- ... keep existing code (billing related tables)
+
 -- Billing related tables
 CREATE TABLE IF NOT EXISTS customers (
     id VARCHAR(20) NOT NULL PRIMARY KEY,
@@ -235,23 +238,21 @@ CREATE TABLE IF NOT EXISTS rates (
     INDEX date_idx (effective_date)
 );
 
--- FIXED DID numbers table - Updated to match backend expectations
 CREATE TABLE IF NOT EXISTS did_numbers (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
     number VARCHAR(20) NOT NULL UNIQUE,
     customer_id VARCHAR(20) DEFAULT NULL,
-    customer_name VARCHAR(100) DEFAULT NULL,
-    country VARCHAR(50) NOT NULL DEFAULT 'Unknown',
-    rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    type VARCHAR(20) DEFAULT 'Local',
-    status ENUM('Available', 'Active', 'Suspended') DEFAULT 'Available',
-    notes TEXT DEFAULT NULL,
+    monthly_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    setup_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+    status ENUM('Available', 'Assigned', 'Ported', 'Suspended') DEFAULT 'Available',
+    country VARCHAR(50) DEFAULT NULL,
+    region VARCHAR(50) DEFAULT NULL,
+    features JSON DEFAULT NULL,
+    assigned_date DATE DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
     INDEX customer_idx (customer_id),
-    INDEX status_idx (status),
-    INDEX number_idx (number)
+    INDEX status_idx (status)
 );
 
 -- System Settings table
