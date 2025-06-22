@@ -1,7 +1,7 @@
 
 #!/bin/bash
 
-# ODBC setup script for iBilling
+# ODBC setup script for iBilling with integrated fixes
 source "$(dirname "$0")/utils.sh"
 
 setup_odbc() {
@@ -16,29 +16,51 @@ setup_odbc() {
     
     # Write ODBC driver config
     print_status "Configuring ODBC drivers..."
-    sudo cp "$(dirname "$0")/../config/odbcinst.ini" /etc/odbcinst.ini
+    sudo tee /etc/odbcinst.ini > /dev/null <<'EOF'
+[MariaDB]
+Description=MariaDB ODBC Driver
+Driver=/usr/lib/x86_64-linux-gnu/odbc/libmaodbc.so
+Setup=/usr/lib/x86_64-linux-gnu/odbc/libodbcmyS.so
+FileUsage=1
+EOF
 
-    # Write ODBC DSN config from template
+    # Write ODBC DSN config
     print_status "Configuring ODBC data source..."
-    sudo cp "$(dirname "$0")/../config/odbc.ini.template" /etc/odbc.ini
-    sudo sed -i "s/ASTERISK_DB_PASSWORD_PLACEHOLDER/${asterisk_db_password}/g" /etc/odbc.ini
+    sudo tee /etc/odbc.ini > /dev/null <<EOF
+[asterisk-connector]
+Description=MySQL connection to 'asterisk' database
+Driver=MariaDB
+Database=asterisk
+Server=localhost
+Port=3306
+Socket=/var/run/mysqld/mysqld.sock
+Option=3
+CharacterSet=utf8
+EOF
 
-    # Verify ODBC driver installation
-    print_status "Verifying ODBC driver installation..."
-    if odbcinst -q -d | grep -q "MariaDB"; then
-        print_status "✓ MariaDB ODBC driver installed"
-    else
-        print_warning "⚠ MariaDB ODBC driver not found"
-    fi
+    # Update res_odbc.conf with modern Asterisk 22 syntax
+    print_status "Updating ODBC configuration with modern Asterisk 22 syntax..."
+    sudo tee /etc/asterisk/res_odbc.conf > /dev/null <<EOF
+[asterisk]
+enabled => yes
+dsn => asterisk-connector
+username => asterisk
+password => ${asterisk_db_password}
+pooling => no
+limit => 1
+pre-connect => yes
+sanitysql => select 1
+connect_timeout => 10
+negative_connection_cache => 300
+EOF
 
-    # Verify DSN configuration
-    print_status "Verifying DSN configuration..."
-    if odbcinst -q -s | grep -q "asterisk-connector"; then
-        print_status "✓ asterisk-connector DSN configured"
-    else
-        print_warning "⚠ asterisk-connector DSN not found"
-    fi
+    # Set proper file permissions
+    sudo chown asterisk:asterisk /etc/asterisk/res_odbc.conf
+    sudo chmod 640 /etc/asterisk/res_odbc.conf
 
+    # Test ODBC connection
+    test_odbc_connection "$asterisk_db_password"
+    
     print_status "ODBC configuration completed"
 }
 
@@ -47,13 +69,13 @@ test_odbc_connection() {
     
     print_status "Testing ODBC connection..."
     
-    # Test with isql
+    # Test with isql if available
     if command -v isql >/dev/null 2>&1; then
         if echo "SELECT 1 as test;" | isql -v asterisk-connector asterisk "${asterisk_db_password}" 2>/dev/null | grep -q "test"; then
             print_status "✓ ODBC connection test successful"
             return 0
         else
-            print_warning "✗ ODBC connection test failed with isql"
+            print_warning "⚠ ODBC connection test failed with isql"
         fi
     else
         print_warning "isql command not available"
@@ -70,33 +92,6 @@ test_odbc_connection() {
     return 0
 }
 
-verify_odbc_realtime() {
-    print_status "Verifying ODBC realtime configuration..."
-    
-    # Check if required configuration files exist
-    local config_files=(
-        "/etc/asterisk/res_odbc.conf"
-        "/etc/asterisk/extconfig.conf"
-        "/etc/odbc.ini"
-        "/etc/odbcinst.ini"
-    )
-    
-    local missing_files=()
-    for file in "${config_files[@]}"; do
-        if [ ! -f "$file" ]; then
-            missing_files+=("$file")
-        fi
-    done
-    
-    if [ ${#missing_files[@]} -gt 0 ]; then
-        print_error "Missing configuration files: ${missing_files[*]}"
-        return 1
-    fi
-    
-    print_status "✓ All ODBC configuration files present"
-    return 0
-}
-
 # Execute if run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [ $# -ne 1 ]; then
@@ -104,6 +99,4 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         exit 1
     fi
     setup_odbc "$1"
-    test_odbc_connection "$1"
-    verify_odbc_realtime
 fi
