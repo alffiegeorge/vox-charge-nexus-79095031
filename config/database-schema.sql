@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS ps_endpoints (
     moh_suggest VARCHAR(40) DEFAULT NULL,
     outbound_auth VARCHAR(40) DEFAULT NULL,
     outbound_proxy VARCHAR(40) DEFAULT NULL,
-    rewrite_contact ENUM('yes','no') DEFAULT 'no',
     rtp_ipv6 ENUM('yes','no') DEFAULT 'no',
     rtp_symmetric ENUM('yes','no') DEFAULT 'no',
     send_diversion ENUM('yes','no') DEFAULT 'yes',
@@ -189,7 +188,7 @@ CREATE TABLE IF NOT EXISTS cdr (
     INDEX accountcode_idx (accountcode)
 );
 
--- Legacy SIP Credentials table (for compatibility)
+-- SIP Credentials table (REQUIRED for PJSIP endpoint creation)
 CREATE TABLE IF NOT EXISTS sip_credentials (
     id INT(11) NOT NULL AUTO_INCREMENT,
     customer_id VARCHAR(20) NOT NULL,
@@ -238,18 +237,20 @@ CREATE TABLE IF NOT EXISTS rates (
     INDEX date_idx (effective_date)
 );
 
+-- Fixed DID Numbers table with correct column names
 CREATE TABLE IF NOT EXISTS did_numbers (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
     number VARCHAR(20) NOT NULL UNIQUE,
     customer_id VARCHAR(20) DEFAULT NULL,
-    monthly_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
-    setup_cost DECIMAL(8,2) NOT NULL DEFAULT 0.00,
-    status ENUM('Available', 'Assigned', 'Ported', 'Suspended') DEFAULT 'Available',
-    country VARCHAR(50) DEFAULT NULL,
-    region VARCHAR(50) DEFAULT NULL,
-    features JSON DEFAULT NULL,
+    customer_name VARCHAR(100) DEFAULT 'Unassigned',
+    country VARCHAR(50) NOT NULL DEFAULT 'Unknown',
+    rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    type VARCHAR(20) DEFAULT 'Local',
+    status ENUM('Available', 'Active', 'Suspended') DEFAULT 'Available',
+    notes TEXT DEFAULT NULL,
     assigned_date DATE DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
     INDEX customer_idx (customer_id),
     INDEX status_idx (status)
@@ -466,7 +467,3 @@ INSERT IGNORE INTO rates (destination_prefix, destination_name, rate_per_minute,
 ('49', 'Germany', 0.0280, 60),
 ('33', 'France', 0.0240, 60),
 ('91', 'India', 0.0180, 60);
-
--- Create default admin user (password: admin123)
-INSERT IGNORE INTO admin_users (username, email, password_hash, salt, full_name, role, status) VALUES
-('admin', 'admin@ibilling.com', 'hash_placeholder', 'salt_placeholder', 'System Administrator', 'Super Admin', 'Active');
