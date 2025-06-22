@@ -81,6 +81,9 @@ main() {
     # Create backend service environment
     setup_backend_service "$ASTERISK_DB_PASSWORD"
     
+    # Apply comprehensive PJSIP endpoint fix
+    apply_comprehensive_pjsip_fix "$MYSQL_ROOT_PASSWORD" "$ASTERISK_DB_PASSWORD"
+    
     print_status "iBilling installation with integrated fixes completed successfully!"
     print_status ""
     print_status "Next steps:"
@@ -152,68 +155,55 @@ EOF
     print_status "✅ Integrated realtime fixes applied successfully!"
 }
 
-# ... keep existing code (setup_backend_service function)
-setup_backend_service() {
-    local asterisk_db_password=$1
+apply_comprehensive_pjsip_fix() {
+    local mysql_root_password=$1
+    local asterisk_db_password=$2
     
-    print_status "Setting up backend service..."
-    sudo mkdir -p /opt/billing
+    print_status "Applying comprehensive PJSIP endpoint fix..."
     
-    # Generate JWT secret
-    local jwt_secret=$(openssl rand -base64 32)
-    
-    # Create environment file
-    sudo tee /opt/billing/.env > /dev/null <<EOL
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=asterisk
-DB_USER=asterisk
-DB_PASSWORD=${asterisk_db_password}
+    # Run the PJSIP endpoint fix script
+    if [ -f "scripts/fix-pjsip-endpoints.sh" ]; then
+        chmod +x scripts/fix-pjsip-endpoints.sh
+        ./scripts/fix-pjsip-endpoints.sh "$mysql_root_password" "$asterisk_db_password"
+    else
+        print_warning "PJSIP endpoint fix script not found, applying manual fix..."
+        
+        # Manual fix for any existing customers
+        print_status "Creating PJSIP endpoints for existing customers..."
+        mysql -u asterisk -p"${asterisk_db_password}" asterisk <<'EOF'
+-- Fix any customers that might need PJSIP endpoints
+INSERT IGNORE INTO ps_endpoints (id, transport, aors, auth, context, disallow, allow, 
+                                 direct_media, ice_support, force_rport, 
+                                 rtp_symmetric, send_rpid, send_pai, trust_id_inbound, callerid)
+SELECT sc.sip_username, 'transport-udp', sc.sip_username, sc.sip_username, 'from-internal', 'all', 'ulaw,alaw,g722,g729',
+       'no', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', CONCAT('"', c.name, '" <', sc.sip_username, '>')
+FROM sip_credentials sc
+JOIN customers c ON sc.customer_id = c.id
+WHERE sc.status = 'active'
+AND NOT EXISTS (SELECT 1 FROM ps_endpoints WHERE id = sc.sip_username);
 
-# JWT Configuration
-JWT_SECRET=${jwt_secret}
+INSERT IGNORE INTO ps_auths (id, auth_type, username, password)
+SELECT sc.sip_username, 'userpass', sc.sip_username, sc.sip_password
+FROM sip_credentials sc
+WHERE sc.status = 'active'
+AND NOT EXISTS (SELECT 1 FROM ps_auths WHERE id = sc.sip_username);
 
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-
-# Asterisk Configuration
-ASTERISK_HOST=localhost
-ASTERISK_PORT=5038
-ASTERISK_USERNAME=admin
-ASTERISK_SECRET=
-EOL
-
-    # Set proper permissions
-    sudo chmod 600 /opt/billing/.env
-    sudo chown root:root /opt/billing/.env
-    
-    # Create systemd service
-    sudo tee /etc/systemd/system/ibilling-backend.service > /dev/null <<EOF
-[Unit]
-Description=iBilling Backend API Server
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=ihs
-WorkingDirectory=/opt/billing/web/backend
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/billing/.env
-
-[Install]
-WantedBy=multi-user.target
+INSERT IGNORE INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency)
+SELECT sc.sip_username, 1, 1, 60
+FROM sip_credentials sc
+WHERE sc.status = 'active'
+AND NOT EXISTS (SELECT 1 FROM ps_aors WHERE id = sc.sip_username);
 EOF
-
-    # Reload systemd
-    sudo systemctl daemon-reload
+        
+        # Reload PJSIP
+        sudo asterisk -rx "pjsip reload" >/dev/null 2>&1
+        sleep 3
+    fi
     
-    print_status "Backend service configured"
+    print_status "✅ Comprehensive PJSIP fix applied successfully!"
 }
+
+# ... keep existing code (setup_backend_service function)
 
 # Execute if run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

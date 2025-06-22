@@ -82,13 +82,13 @@ class AsteriskIntegration {
       // Store SIP credentials in database first
       await this.storeSipCredentials(customerId, sipUsername, sipPassword, sipDomain);
       
-      // Create PJSIP endpoint in realtime table
+      // Create PJSIP endpoint in realtime table with correct schema
       await executeQuery(`
         INSERT INTO ps_endpoints (id, transport, aors, auth, context, disallow, allow, 
-                                 direct_media, ice_support, force_rport, rewrite_contact, 
+                                 direct_media, ice_support, force_rport, 
                                  rtp_symmetric, send_rpid, send_pai, trust_id_inbound, callerid)
         VALUES (?, 'transport-udp', ?, ?, 'from-internal', 'all', 'ulaw,alaw,g722,g729',
-                'no', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', ?)
+                'no', 'yes', 'yes', 'yes', 'yes', 'yes', 'yes', ?)
         ON DUPLICATE KEY UPDATE
         aors = VALUES(aors), auth = VALUES(auth), callerid = VALUES(callerid)
       `, [sipUsername, sipUsername, sipUsername, `"${customerData.name}" <${sipUsername}>`]);
@@ -105,10 +105,10 @@ class AsteriskIntegration {
 
       console.log('✓ PJSIP auth created in ps_auths table');
 
-      // Create PJSIP AOR in realtime table
+      // Create PJSIP AOR in realtime table with correct data types
       await executeQuery(`
         INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency)
-        VALUES (?, 1, 'yes', 60)
+        VALUES (?, 1, 1, 60)
         ON DUPLICATE KEY UPDATE
         max_contacts = VALUES(max_contacts), remove_existing = VALUES(remove_existing)
       `, [sipUsername]);
