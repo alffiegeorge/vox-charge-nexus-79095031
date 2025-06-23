@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,21 +33,18 @@ const DIDs = () => {
 
   const fetchDIDs = async () => {
     try {
-      console.log('=== FRONTEND: Starting DID fetch ===');
+      console.log('Fetching DIDs from database...');
       setLoading(true);
       setError(null);
       
       const data = await apiClient.getDIDs() as any[];
-      console.log('=== FRONTEND: DID API response ===');
-      console.log('Response type:', typeof data);
-      console.log('Response length:', Array.isArray(data) ? data.length : 'Not an array');
-      console.log('Raw API response:', data);
+      console.log('DIDs data received:', data);
       
       if (!Array.isArray(data)) {
         throw new Error(`Expected array but got ${typeof data}`);
       }
       
-      // Transform the data to match our interface
+      // Transform the data to match our interface with safe property access
       const transformedDIDs = data.map((did: any, index: number) => {
         console.log(`Transforming DID ${index}:`, did);
         return {
@@ -63,14 +59,10 @@ const DIDs = () => {
         };
       });
       
-      console.log('=== FRONTEND: Transformed DIDs ===');
-      console.log('Transformed count:', transformedDIDs.length);
-      console.log('Transformed data:', transformedDIDs);
-      
+      console.log('Transformed DIDs:', transformedDIDs);
       setDids(transformedDIDs);
     } catch (error) {
-      console.error('=== FRONTEND: DID fetch error ===');
-      console.error('Error details:', error);
+      console.error('Error fetching DIDs:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       setError(`Failed to load DIDs: ${errorMessage}`);
       toast({
@@ -169,11 +161,14 @@ const DIDs = () => {
     setEditingDID(null);
   };
 
-  const filteredDids = dids.filter(did =>
-    did.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    did.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    did.country.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredDids = dids.filter(did => {
+    const searchLower = searchTerm.toLowerCase();
+    const numberMatch = (did.number || '').toLowerCase().includes(searchLower);
+    const customerMatch = (did.customer || '').toLowerCase().includes(searchLower);
+    const countryMatch = (did.country || '').toLowerCase().includes(searchLower);
+    
+    return numberMatch || customerMatch || countryMatch;
+  });
 
   const getStatusBadge = (status: string, customerId?: string) => {
     if (customerId && status === "Active") {
