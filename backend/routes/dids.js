@@ -96,7 +96,7 @@ router.post('/', async (req, res) => {
     // Determine customer assignment
     let customerName = 'Unassigned';
     let finalCustomerId = null;
-    let finalStatus = 'Available'; // Use full status name for database
+    let finalStatus = 'avail'; // Use short status that fits database column
 
     if (customerId && customerId !== 'unassigned') {
       // Verify customer exists
@@ -108,7 +108,7 @@ router.post('/', async (req, res) => {
       
       customerName = customerData[0].name;
       finalCustomerId = customerId;
-      finalStatus = 'Active'; // Use full status name for database
+      finalStatus = 'activ'; // Use short status that fits database column
       
       console.log(`Assigning DID ${number} to customer ${customerName} (${customerId})`);
     }
@@ -140,7 +140,7 @@ router.post('/', async (req, res) => {
       country,
       rate: numericRate,
       type,
-      status: finalStatus,
+      status: finalStatus === 'activ' ? 'Active' : 'Available', // Return full status name to frontend
       customer_id: finalCustomerId,
       notes: notes || '',
       message: finalCustomerId ? `DID ${number} created and assigned to ${customerName}` : `DID ${number} created and available for assignment`
@@ -171,7 +171,7 @@ router.put('/:number', async (req, res) => {
     // Determine customer assignment and map status values
     let customerName = 'Unassigned';
     let finalCustomerId = null;
-    let finalStatus = 'Available'; // Use full status name for database
+    let finalStatus = 'avail'; // Use short status that fits database column
 
     if (customerId && customerId !== 'unassigned') {
       // Verify customer exists and get customer data
@@ -184,7 +184,7 @@ router.put('/:number', async (req, res) => {
       
       customerName = customerData[0].name;
       finalCustomerId = customerId;
-      finalStatus = 'Active'; // Use full status name for database
+      finalStatus = 'activ'; // Use short status that fits database column
       
       console.log(`Updating DID ${number} assignment to customer ${customerName} (${customerId})`);
     } else {
@@ -204,7 +204,7 @@ router.put('/:number', async (req, res) => {
       country,
       numericRate, // Use numeric rate instead of string with $
       type,
-      finalStatus, // Use full status name
+      finalStatus, // Use short status that fits database column
       finalCustomerId,
       notes || '',
       number
@@ -229,7 +229,7 @@ router.put('/:number', async (req, res) => {
       country,
       rate: numericRate,
       type,
-      status: finalStatus,
+      status: finalStatus === 'activ' ? 'Active' : 'Available', // Return full status name to frontend
       customer_id: finalCustomerId,
       notes: notes || '',
       message: finalCustomerId ? `DID ${number} updated and assigned to ${customerName}` : `DID ${number} updated and unassigned`
@@ -269,10 +269,10 @@ router.post('/:number/assign', async (req, res) => {
 
     const customerName = customerData[0].name;
 
-    // Update DID assignment with full status name
+    // Update DID assignment with short status that fits database column
     await executeQuery(`
       UPDATE did_numbers 
-      SET customer_name = ?, customer_id = ?, status = 'Active', updated_at = NOW()
+      SET customer_name = ?, customer_id = ?, status = 'activ', updated_at = NOW()
       WHERE number = ?
     `, [customerName, customerId, number]);
 
@@ -285,7 +285,7 @@ router.post('/:number/assign', async (req, res) => {
       number,
       customer_name: customerName,
       customer_id: customerId,
-      status: 'Active',
+      status: 'Active', // Return full status name to frontend
       message: `DID ${number} assigned to ${customerName}`
     });
 
@@ -309,10 +309,10 @@ router.post('/:number/unassign', async (req, res) => {
       return res.status(404).json({ error: 'DID not found' });
     }
 
-    // Update DID assignment with full status name
+    // Update DID assignment with short status that fits database column
     await executeQuery(`
       UPDATE did_numbers 
-      SET customer_name = 'Unassigned', customer_id = NULL, status = 'Available', updated_at = NOW()
+      SET customer_name = 'Unassigned', customer_id = NULL, status = 'avail', updated_at = NOW()
       WHERE number = ?
     `, [number]);
 
@@ -325,7 +325,7 @@ router.post('/:number/unassign', async (req, res) => {
       number,
       customer_name: 'Unassigned',
       customer_id: null,
-      status: 'Available',
+      status: 'Available', // Return full status name to frontend
       message: `DID ${number} unassigned`
     });
 

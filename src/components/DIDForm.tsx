@@ -108,8 +108,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
       const selectedCustomer = customers.find(c => c.id === formData.customerId);
       const customerName = selectedCustomer ? selectedCustomer.name : (formData.customer || "Unassigned");
       
-      // Determine status based on customer assignment
-      const didStatus = formData.customerId ? "Active" : "Available";
+      // Use the selected status or determine it based on customer assignment
+      const didStatus = formData.status || (formData.customerId ? "Active" : "Available");
 
       if (editingDID) {
         const updatedDID: DID = {
@@ -178,7 +178,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
       ...prev,
       customerId: actualCustomerId,
       customer: selectedCustomer ? selectedCustomer.name : "",
-      status: actualCustomerId ? "Active" : "Available"
+      // Don't automatically change status - let user choose
+      // status: actualCustomerId ? "Active" : "Available"
     }));
   };
 
@@ -286,7 +287,6 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               <Select 
                 value={formData.status || "Available"} 
                 onValueChange={(value) => handleInputChange("status", value)}
-                disabled={!!formData.customerId}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
@@ -297,11 +297,9 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                   <SelectItem value="Suspended">Suspended</SelectItem>
                 </SelectContent>
               </Select>
-              {formData.customerId && (
-                <div className="text-xs text-gray-500">
-                  Status is automatically set to "Active" when assigned to a customer
-                </div>
-              )}
+              <div className="text-xs text-gray-500">
+                Choose the appropriate status for this DID number
+              </div>
             </div>
 
             <div className="space-y-2">
