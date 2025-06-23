@@ -182,11 +182,18 @@ router.put('/:number', async (req, res) => {
       console.log(`Unassigning DID ${number}`);
     }
 
+    // Clean and parse the rate value - remove $ sign and convert to number
+    let cleanRate = rate;
+    if (typeof rate === 'string') {
+      cleanRate = rate.replace('$', '').replace(',', '');
+    }
+    const numericRate = parseFloat(cleanRate) || 0;
+
     // Update DID in database - make sure no undefined values
     const updateParams = [
       customerName,
       country,
-      rate,
+      numericRate, // Use numeric rate instead of string with $
       type,
       finalStatus,
       finalCustomerId,
@@ -211,7 +218,7 @@ router.put('/:number', async (req, res) => {
       number,
       customer_name: customerName,
       country,
-      rate,
+      rate: numericRate,
       type,
       status: finalStatus,
       customer_id: finalCustomerId,
