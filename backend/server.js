@@ -135,6 +135,20 @@ async function setupDefaultUsers() {
       console.log('Could not describe users table:', descError.message);
     }
     
+    // Get the role enum definition
+    try {
+      const enumQuery = await executeQuery(`
+        SELECT COLUMN_TYPE 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'users' 
+        AND COLUMN_NAME = 'role'
+      `);
+      console.log('Role enum definition:', enumQuery[0]);
+    } catch (enumError) {
+      console.log('Could not get enum definition:', enumError.message);
+    }
+    
     // Check if admin user exists
     const adminResult = await executeQuery('SELECT * FROM users WHERE username = ?', ['admin']);
     const adminUsers = adminResult[0];
@@ -156,34 +170,18 @@ async function setupDefaultUsers() {
       } catch (insertError) {
         console.log('Failed with role "admin", trying alternative values...');
         console.log('Insert error:', insertError.message);
-        
-        // If that fails, let's see what enum values are allowed
-        try {
-          const enumQuery = await executeQuery(`
-            SELECT COLUMN_TYPE 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = 'users' 
-            AND COLUMN_NAME = 'role'
-          `);
-          console.log('Role enum definition:', enumQuery[0]);
-        } catch (enumError) {
-          console.log('Could not get enum definition:', enumError.message);
-        }
       }
-    } else if (!adminUsers[0].password) {
-      console.log('Fixing admin user password...');
+    } else {
+      console.log('Admin user exists, checking/fixing password...');
       
-      // Hash the password 'admin123' and update
+      // Always update the admin password to ensure it's correct
       const hashedPassword = await bcrypt.hash('admin123', 10);
       
       await executeQuery(`
         UPDATE users SET password = ? WHERE username = ?
       `, [hashedPassword, 'admin']);
       
-      console.log('✓ Admin user password fixed');
-    } else {
-      console.log('✓ Admin user already exists with password');
+      console.log('✓ Admin user password updated to admin123');
     }
     
     // Check if customer user exists
@@ -196,15 +194,27 @@ async function setupDefaultUsers() {
       // Hash the password 'customer123'
       const hashedPassword = await bcrypt.hash('customer123', 10);
       
-      try {
-        await executeQuery(`
-          INSERT INTO users (username, password, email, role, status) 
-          VALUES (?, ?, ?, ?, ?)
-        `, ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']);
-        
-        console.log('✓ Default customer user created');
-      } catch (insertError) {
-        console.log('Failed to create customer user:', insertError.message);
+      // Try different role values that might be accepted
+      const roleValues = ['customer', 'Customer', 'CUSTOMER', 'user', 'User'];
+      let customerCreated = false;
+      
+      for (const roleValue of roleValues) {
+        try {
+          await executeQuery(`
+            INSERT INTO users (username, password, email, role, status) 
+            VALUES (?, ?, ?, ?, ?)
+          `, ['customer', hashedPassword, 'customer@ibilling.local', roleValue, 'active']);
+          
+          console.log(`✓ Default customer user created with role "${roleValue}"`);
+          customerCreated = true;
+          break;
+        } catch (insertError) {
+          console.log(`Failed to create customer user with role "${roleValue}":`, insertError.message);
+        }
+      }
+      
+      if (!customerCreated) {
+        console.log('Could not create customer user with any role value');
       }
     } else if (!customerUsers[0].password) {
       console.log('Fixing customer user password...');
