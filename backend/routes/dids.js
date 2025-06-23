@@ -152,8 +152,10 @@ router.put('/:number', async (req, res) => {
     console.log('Updating DID:', number, req.body);
 
     // Check if DID exists
-    const existingDid = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
-    if (existingDid.length === 0) {
+    const existingDidResult = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
+    const existingDid = existingDidResult[0]; // Get the rows array
+    
+    if (!existingDid || existingDid.length === 0) {
       return res.status(404).json({ error: 'DID not found' });
     }
 
@@ -163,9 +165,11 @@ router.put('/:number', async (req, res) => {
     let finalStatus = status || 'Available';
 
     if (customerId && customerId !== 'unassigned') {
-      // Verify customer exists
-      const customerData = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
-      if (customerData.length === 0) {
+      // Verify customer exists and get customer data
+      const customerResult = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
+      const customerData = customerResult[0]; // Get the rows array
+      
+      if (!customerData || customerData.length === 0) {
         return res.status(404).json({ error: 'Customer not found' });
       }
       
@@ -178,12 +182,25 @@ router.put('/:number', async (req, res) => {
       console.log(`Unassigning DID ${number}`);
     }
 
-    // Update DID in database
+    // Update DID in database - make sure no undefined values
+    const updateParams = [
+      customerName,
+      country,
+      rate,
+      type,
+      finalStatus,
+      finalCustomerId,
+      notes || '',
+      number
+    ];
+
+    console.log('Update parameters:', updateParams);
+
     await executeQuery(`
       UPDATE did_numbers 
       SET customer_name = ?, country = ?, rate = ?, type = ?, status = ?, customer_id = ?, notes = ?, updated_at = NOW()
       WHERE number = ?
-    `, [customerName, country, rate, type, finalStatus, finalCustomerId, notes || '', number]);
+    `, updateParams);
 
     console.log('DID updated successfully');
 
