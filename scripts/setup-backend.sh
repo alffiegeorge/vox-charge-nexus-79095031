@@ -9,6 +9,7 @@ setup_nodejs_backend() {
     
     # Create backend directory if it doesn't exist
     create_directory "/opt/billing/web/backend"
+    create_directory "/opt/billing/web/backend/routes"
     
     # Copy backend files
     print_status "Copying backend application files..."
@@ -26,8 +27,8 @@ setup_nodejs_backend() {
     print_status "Installing backend dependencies..."
     cd /opt/billing/web/backend
     
-    # Install asterisk-manager dependency that was missing
-    npm install asterisk-manager mysql2 express cors jsonwebtoken bcryptjs dotenv
+    # Install all required dependencies
+    npm install express cors jsonwebtoken bcryptjs dotenv mysql2
     
     print_status "Backend setup completed"
 }
