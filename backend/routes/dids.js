@@ -1,3 +1,4 @@
+
 const express = require('express');
 const router = express.Router();
 const { executeQuery } = require('../database');
@@ -87,7 +88,8 @@ router.post('/', async (req, res) => {
     }
 
     // Check if DID already exists
-    const existingDid = await executeQuery('SELECT id FROM did_numbers WHERE number = ?', [number]);
+    const existingDidResult = await executeQuery('SELECT id FROM did_numbers WHERE number = ?', [number]);
+    const existingDid = existingDidResult[0] || [];
     if (existingDid.length > 0) {
       return res.status(409).json({ error: 'DID number already exists' });
     }
@@ -95,18 +97,19 @@ router.post('/', async (req, res) => {
     // Determine customer assignment
     let customerName = 'Unassigned';
     let finalCustomerId = null;
-    let finalStatus = 'available'; // Use lowercase status
+    let finalStatus = 'avail'; // Use short status for database
 
     if (customerId && customerId !== 'unassigned') {
       // Verify customer exists
-      const customerData = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
+      const customerResult = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
+      const customerData = customerResult[0] || [];
       if (customerData.length === 0) {
         return res.status(404).json({ error: 'Customer not found' });
       }
       
       customerName = customerData[0].name;
       finalCustomerId = customerId;
-      finalStatus = 'active'; // Use lowercase status
+      finalStatus = 'activ'; // Use short status for database
       
       console.log(`Assigning DID ${number} to customer ${customerName} (${customerId})`);
     }
@@ -153,21 +156,21 @@ router.put('/:number', async (req, res) => {
 
     // Check if DID exists
     const existingDidResult = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
-    const existingDid = existingDidResult[0]; // Get the rows array
+    const existingDid = existingDidResult[0] || []; // Get the rows array
     
     if (!existingDid || existingDid.length === 0) {
       return res.status(404).json({ error: 'DID not found' });
     }
 
-    // Determine customer assignment
+    // Determine customer assignment and map status values
     let customerName = 'Unassigned';
     let finalCustomerId = null;
-    let finalStatus = 'available'; // Use lowercase status
+    let finalStatus = 'avail'; // Use short status for database
 
     if (customerId && customerId !== 'unassigned') {
       // Verify customer exists and get customer data
       const customerResult = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
-      const customerData = customerResult[0]; // Get the rows array
+      const customerData = customerResult[0] || []; // Get the rows array
       
       if (!customerData || customerData.length === 0) {
         return res.status(404).json({ error: 'Customer not found' });
@@ -175,7 +178,7 @@ router.put('/:number', async (req, res) => {
       
       customerName = customerData[0].name;
       finalCustomerId = customerId;
-      finalStatus = 'active'; // Use lowercase status
+      finalStatus = 'activ'; // Use short status for database
       
       console.log(`Updating DID ${number} assignment to customer ${customerName} (${customerId})`);
     } else {
@@ -195,7 +198,7 @@ router.put('/:number', async (req, res) => {
       country,
       numericRate, // Use numeric rate instead of string with $
       type,
-      finalStatus, // Use lowercase status
+      finalStatus, // Use short status
       finalCustomerId,
       notes || '',
       number
@@ -245,23 +248,25 @@ router.post('/:number/assign', async (req, res) => {
     }
 
     // Check if DID exists
-    const existingDid = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
+    const existingDidResult = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
+    const existingDid = existingDidResult[0] || [];
     if (existingDid.length === 0) {
       return res.status(404).json({ error: 'DID not found' });
     }
 
     // Verify customer exists
-    const customerData = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
+    const customerResult = await executeQuery('SELECT id, name FROM customers WHERE id = ?', [customerId]);
+    const customerData = customerResult[0] || [];
     if (customerData.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
     const customerName = customerData[0].name;
 
-    // Update DID assignment with lowercase status
+    // Update DID assignment with short status
     await executeQuery(`
       UPDATE did_numbers 
-      SET customer_name = ?, customer_id = ?, status = 'active', updated_at = NOW()
+      SET customer_name = ?, customer_id = ?, status = 'activ', updated_at = NOW()
       WHERE number = ?
     `, [customerName, customerId, number]);
 
@@ -274,7 +279,7 @@ router.post('/:number/assign', async (req, res) => {
       number,
       customer_name: customerName,
       customer_id: customerId,
-      status: 'active',
+      status: 'activ',
       message: `DID ${number} assigned to ${customerName}`
     });
 
@@ -292,15 +297,16 @@ router.post('/:number/unassign', async (req, res) => {
     console.log(`Unassigning DID ${number}`);
 
     // Check if DID exists
-    const existingDid = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
+    const existingDidResult = await executeQuery('SELECT * FROM did_numbers WHERE number = ?', [number]);
+    const existingDid = existingDidResult[0] || [];
     if (existingDid.length === 0) {
       return res.status(404).json({ error: 'DID not found' });
     }
 
-    // Update DID assignment with lowercase status
+    // Update DID assignment with short status
     await executeQuery(`
       UPDATE did_numbers 
-      SET customer_name = 'Unassigned', customer_id = NULL, status = 'available', updated_at = NOW()
+      SET customer_name = 'Unassigned', customer_id = NULL, status = 'avail', updated_at = NOW()
       WHERE number = ?
     `, [number]);
 
@@ -313,7 +319,7 @@ router.post('/:number/unassign', async (req, res) => {
       number,
       customer_name: 'Unassigned',
       customer_id: null,
-      status: 'available',
+      status: 'avail',
       message: `DID ${number} unassigned`
     });
 
@@ -330,11 +336,13 @@ router.get('/customer/:customerId', async (req, res) => {
     
     console.log(`Fetching DIDs for customer ${customerId}`);
 
-    const dids = await executeQuery(`
+    const result = await executeQuery(`
       SELECT * FROM did_numbers 
       WHERE customer_id = ?
       ORDER BY created_at DESC
     `, [customerId]);
+
+    const dids = result[0] || [];
 
     console.log(`Found ${dids.length} DIDs for customer ${customerId}`);
 
@@ -352,10 +360,11 @@ async function updateAsteriskDialplan(didNumber, customerId) {
     
     if (customerId) {
       // Get customer's SIP username
-      const sipCredentials = await executeQuery(
+      const sipResult = await executeQuery(
         'SELECT sip_username FROM sip_credentials WHERE customer_id = ? AND status = "active"',
         [customerId]
       );
+      const sipCredentials = sipResult[0] || [];
 
       if (sipCredentials.length > 0) {
         const sipUsername = sipCredentials[0].sip_username;
