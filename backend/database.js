@@ -1,3 +1,4 @@
+
 // Load environment variables from .env file
 require('dotenv').config();
 
@@ -49,7 +50,11 @@ async function executeQuery(query, params = []) {
   let connection;
   try {
     if (!db) {
-      throw new Error('Database pool not available');
+      console.log('Database pool not available, attempting to create...');
+      const success = await createDatabasePool();
+      if (!success) {
+        throw new Error('Failed to create database pool');
+      }
     }
     
     connection = await db.getConnection();
@@ -70,6 +75,11 @@ async function executeQuery(query, params = []) {
     throw error;
   }
 }
+
+// Initialize the database pool when this module is loaded
+createDatabasePool().catch(error => {
+  console.error('Failed to initialize database pool:', error);
+});
 
 module.exports = {
   createDatabasePool,
