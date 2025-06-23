@@ -31,6 +31,9 @@ async function startServer() {
     console.log('Setting up DID tables...');
     await setupDIDTables();
     
+    // Ensure default admin user exists with proper password hash
+    await setupDefaultUsers();
+    
     console.log('Database initialization completed');
   } catch (error) {
     console.error('Database initialization failed:', error);
@@ -42,13 +45,26 @@ async function startServer() {
     const { username, password } = req.body;
 
     try {
+      console.log('Login attempt for username:', username);
+      
       const users = await executeQuery('SELECT * FROM users WHERE username = ?', [username]);
       if (users.length === 0) {
+        console.log('User not found:', username);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
       const user = users[0];
+      console.log('User found:', { id: user.id, username: user.username, role: user.role });
+      console.log('Password hash exists:', !!user.password);
+
+      // Check if password hash exists
+      if (!user.password) {
+        console.error('User password hash is missing for:', username);
+        return res.status(401).json({ error: 'Account setup incomplete. Please contact administrator.' });
+      }
+
       const passwordMatch = await bcrypt.compare(password, user.password);
+      console.log('Password match:', passwordMatch);
 
       if (!passwordMatch) {
         return res.status(401).json({ error: 'Invalid credentials' });
@@ -103,6 +119,76 @@ async function startServer() {
   app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
   });
+}
+
+// Function to ensure default users exist
+async function setupDefaultUsers() {
+  try {
+    console.log('Setting up default users...');
+    
+    // Check if admin user exists
+    const adminUsers = await executeQuery('SELECT * FROM users WHERE username = ?', ['admin']);
+    
+    if (adminUsers.length === 0) {
+      console.log('Creating default admin user...');
+      
+      // Hash the password 'admin123'
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      
+      await executeQuery(`
+        INSERT INTO users (username, password, email, role, status) 
+        VALUES (?, ?, ?, ?, ?)
+      `, ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']);
+      
+      console.log('✓ Default admin user created');
+    } else if (!adminUsers[0].password) {
+      console.log('Fixing admin user password...');
+      
+      // Hash the password 'admin123' and update
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      
+      await executeQuery(`
+        UPDATE users SET password = ? WHERE username = ?
+      `, [hashedPassword, 'admin']);
+      
+      console.log('✓ Admin user password fixed');
+    } else {
+      console.log('✓ Admin user already exists with password');
+    }
+    
+    // Check if customer user exists
+    const customerUsers = await executeQuery('SELECT * FROM users WHERE username = ?', ['customer']);
+    
+    if (customerUsers.length === 0) {
+      console.log('Creating default customer user...');
+      
+      // Hash the password 'customer123'
+      const hashedPassword = await bcrypt.hash('customer123', 10);
+      
+      await executeQuery(`
+        INSERT INTO users (username, password, email, role, status) 
+        VALUES (?, ?, ?, ?, ?)
+      `, ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']);
+      
+      console.log('✓ Default customer user created');
+    } else if (!customerUsers[0].password) {
+      console.log('Fixing customer user password...');
+      
+      // Hash the password 'customer123' and update
+      const hashedPassword = await bcrypt.hash('customer123', 10);
+      
+      await executeQuery(`
+        UPDATE users SET password = ? WHERE username = ?
+      `, [hashedPassword, 'customer']);
+      
+      console.log('✓ Customer user password fixed');
+    } else {
+      console.log('✓ Customer user already exists with password');
+    }
+    
+  } catch (error) {
+    console.error('Error setting up default users:', error);
+  }
 }
 
 // Start the server
