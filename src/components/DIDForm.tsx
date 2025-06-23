@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,7 +50,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
 
   useEffect(() => {
     fetchCustomers();
-    
+
     if (editingDID) {
       setFormData({
         number: editingDID.number || "",
@@ -93,7 +92,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!formData.number || !formData.country || !formData.rate || !formData.type) {
       toast({
         title: "Validation Error",
@@ -107,9 +106,9 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
       // Find selected customer details
       const selectedCustomer = customers.find(c => c.id === formData.customerId);
       const customerName = selectedCustomer ? selectedCustomer.name : (formData.customer || "Unassigned");
-      
+
       // Use the selected status or determine it based on customer assignment
-      const didStatus = formData.status || (formData.customerId ? "Active" : "Available");
+      const didStatus = formData.status || (formData.customerId ? "Assigned" : "Available");
 
       if (editingDID) {
         const updatedDID: DID = {
@@ -127,7 +126,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
         // Call API to update DID assignment
         await apiClient.updateDID(updatedDID);
         onDIDUpdated?.(updatedDID);
-        
+
         toast({
           title: "DID Updated",
           description: `DID ${formData.number} has been updated and ${formData.customerId ? `assigned to ${customerName}` : 'unassigned'}`,
@@ -147,13 +146,13 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
         // Call API to create DID
         await apiClient.createDID(newDID);
         onDIDCreated?.(newDID);
-        
+
         toast({
           title: "DID Created",
           description: `DID ${formData.number} has been created and ${formData.customerId ? `assigned to ${customerName}` : 'is available for assignment'}`,
         });
       }
-      
+
       onClose();
     } catch (error) {
       console.error('Error saving DID:', error);
@@ -173,13 +172,13 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
     // Handle the "unassigned" case by checking if value is "unassigned"
     const actualCustomerId = value === "unassigned" ? "" : value;
     const selectedCustomer = customers.find(c => c.id === actualCustomerId);
-    
+
     setFormData(prev => ({
       ...prev,
       customerId: actualCustomerId,
       customer: selectedCustomer ? selectedCustomer.name : "",
       // Don't automatically change status - let user choose
-      // status: actualCustomerId ? "Active" : "Available"
+      // status: actualCustomerId ? "Assigned" : "Available"
     }));
   };
 
@@ -207,8 +206,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               </div>
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
-                <Select 
-                  value={formData.country || ""} 
+                <Select
+                  value={formData.country || ""}
                   onValueChange={(value) => handleInputChange("country", value)}
                 >
                   <SelectTrigger>
@@ -226,8 +225,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
               </div>
               <div className="space-y-2">
                 <Label htmlFor="type">DID Type *</Label>
-                <Select 
-                  value={formData.type || ""} 
+                <Select
+                  value={formData.type || ""}
                   onValueChange={(value) => handleInputChange("type", value)}
                 >
                   <SelectTrigger>
@@ -252,14 +251,14 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="customer">Assign to Customer</Label>
               {loadingCustomers ? (
                 <div className="text-sm text-gray-500">Loading customers...</div>
               ) : (
-                <Select 
-                  value={formData.customerId || "unassigned"} 
+                <Select
+                  value={formData.customerId || "unassigned"}
                   onValueChange={handleCustomerChange}
                 >
                   <SelectTrigger>
@@ -284,8 +283,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
 
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
-              <Select 
-                value={formData.status || "Available"} 
+              <Select
+                value={formData.status || "Available"}
                 onValueChange={(value) => handleInputChange("status", value)}
               >
                 <SelectTrigger>
@@ -293,8 +292,8 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Available">Available</SelectItem>
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="Suspended">Suspended</SelectItem>
+                  <SelectItem value="Assigned">Assigned</SelectItem>
+                  <SelectItem value="Reserved">Reserved</SelectItem>
                 </SelectContent>
               </Select>
               <div className="text-xs text-gray-500">
@@ -312,7 +311,7 @@ const DIDForm = ({ onClose, onDIDCreated, onDIDUpdated, editingDID }: DIDFormPro
                 rows={3}
               />
             </div>
-            
+
             <div className="flex justify-end space-x-2 pt-4">
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel

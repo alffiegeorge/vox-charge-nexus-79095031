@@ -36,14 +36,14 @@ const DIDs = () => {
       console.log('Fetching DIDs from database...');
       setLoading(true);
       setError(null);
-      
+
       const data = await apiClient.getDIDs() as any[];
       console.log('DIDs data received:', data);
-      
+
       if (!Array.isArray(data)) {
         throw new Error(`Expected array but got ${typeof data}`);
       }
-      
+
       // Transform the data to match our interface with safe property access
       const transformedDIDs = data.map((did: any, index: number) => {
         console.log(`Transforming DID ${index}:`, did);
@@ -58,7 +58,7 @@ const DIDs = () => {
           notes: did.notes || ""
         };
       });
-      
+
       console.log('Transformed DIDs:', transformedDIDs);
       setDids(transformedDIDs);
     } catch (error) {
@@ -97,7 +97,7 @@ const DIDs = () => {
   const handleDIDUpdated = async (updatedDID: DID) => {
     try {
       await apiClient.updateDID(updatedDID);
-      setDids(prev => prev.map(did => 
+      setDids(prev => prev.map(did =>
         did.number === updatedDID.number ? updatedDID : did
       ));
       setEditingDID(null);
@@ -166,20 +166,22 @@ const DIDs = () => {
     const numberMatch = (did.number || '').toLowerCase().includes(searchLower);
     const customerMatch = (did.customer || '').toLowerCase().includes(searchLower);
     const countryMatch = (did.country || '').toLowerCase().includes(searchLower);
-    
+
     return numberMatch || customerMatch || countryMatch;
   });
 
   const getStatusBadge = (status: string, customerId?: string) => {
-    if (customerId && status === "Active") {
+    if (customerId && status === "Assigned") {
       return <Badge className="bg-green-100 text-green-800">Assigned</Badge>;
     }
-    
+
     switch (status) {
       case "Available":
         return <Badge variant="secondary">Available</Badge>;
-      case "Active":
-        return <Badge className="bg-blue-100 text-blue-800">Active</Badge>;
+      case "Assigned":
+        return <Badge className="bg-blue-100 text-blue-800">Assigned</Badge>;
+      case "Reserved":
+        return <Badge className="bg-yellow-100 text-yellow-800">Reserved</Badge>;
       case "Suspended":
         return <Badge variant="destructive">Suspended</Badge>;
       default:
@@ -246,8 +248,8 @@ const DIDs = () => {
       <Card className="mb-4 bg-blue-50">
         <CardContent className="p-4">
           <div className="text-sm">
-            <strong>Debug Info:</strong> Loaded {dids.length} DIDs | 
-            Assigned: {assignedDids.length} | 
+            <strong>Debug Info:</strong> Loaded {dids.length} DIDs |
+            Assigned: {assignedDids.length} |
             Available: {availableDids.length}
           </div>
         </CardContent>
@@ -285,20 +287,20 @@ const DIDs = () => {
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <Input 
-                placeholder="Search DIDs..." 
-                className="max-w-sm" 
+              <Input
+                placeholder="Search DIDs..."
+                className="max-w-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
               <div className="flex space-x-2">
-                <Button 
+                <Button
                   variant="outline"
                   onClick={fetchDIDs}
                 >
                   Refresh
                 </Button>
-                <Button 
+                <Button
                   className="bg-blue-600 hover:bg-blue-700"
                   onClick={() => setShowCreateForm(true)}
                 >
@@ -306,7 +308,7 @@ const DIDs = () => {
                 </Button>
               </div>
             </div>
-            
+
             {filteredDids.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <p>No DIDs found</p>
@@ -351,16 +353,16 @@ const DIDs = () => {
                         </td>
                         <td className="p-4">
                           <div className="flex space-x-2">
-                            <Button 
-                              variant="outline" 
+                            <Button
+                              variant="outline"
                               size="sm"
                               onClick={() => handleEditDID(did)}
                             >
                               Edit
                             </Button>
                             {did.customerId ? (
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => handleQuickUnassign(did.number)}
                                 className="text-red-600 hover:text-red-700"
@@ -368,8 +370,8 @@ const DIDs = () => {
                                 Unassign
                               </Button>
                             ) : (
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => handleEditDID(did)}
                                 className="text-green-600 hover:text-green-700"
