@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
@@ -47,8 +46,10 @@ async function startServer() {
     try {
       console.log('Login attempt for username:', username);
       
-      const users = await executeQuery('SELECT * FROM users WHERE username = ?', [username]);
-      if (users.length === 0) {
+      const result = await executeQuery('SELECT * FROM users WHERE username = ?', [username]);
+      const users = result[0]; // Get the actual data from the result
+      
+      if (!users || users.length === 0) {
         console.log('User not found:', username);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -87,16 +88,16 @@ async function startServer() {
   // Dashboard stats route
   app.get('/api/dashboard/stats', async (req, res) => {
     try {
-      const totalCustomers = (await executeQuery('SELECT COUNT(*) AS total FROM customers'))[0].total;
-      const activeCustomers = (await executeQuery('SELECT COUNT(*) AS total FROM customers WHERE status = "active"'))[0].total;
-      const totalDIDs = (await executeQuery('SELECT COUNT(*) AS total FROM did_numbers'))[0].total;
-      const availableDIDs = (await executeQuery('SELECT COUNT(*) AS total FROM did_numbers WHERE customer_id IS NULL'))[0].total;
+      const totalCustomersResult = await executeQuery('SELECT COUNT(*) AS total FROM customers');
+      const activeCustomersResult = await executeQuery('SELECT COUNT(*) AS total FROM customers WHERE status = "active"');
+      const totalDIDsResult = await executeQuery('SELECT COUNT(*) AS total FROM did_numbers');
+      const availableDIDsResult = await executeQuery('SELECT COUNT(*) AS total FROM did_numbers WHERE customer_id IS NULL');
 
       res.json({
-        totalCustomers,
-        activeCustomers,
-        totalDIDs,
-        availableDIDs
+        totalCustomers: totalCustomersResult[0][0].total,
+        activeCustomers: activeCustomersResult[0][0].total,
+        totalDIDs: totalDIDsResult[0][0].total,
+        availableDIDs: availableDIDsResult[0][0].total
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -127,9 +128,10 @@ async function setupDefaultUsers() {
     console.log('Setting up default users...');
     
     // Check if admin user exists
-    const adminUsers = await executeQuery('SELECT * FROM users WHERE username = ?', ['admin']);
+    const adminResult = await executeQuery('SELECT * FROM users WHERE username = ?', ['admin']);
+    const adminUsers = adminResult[0];
     
-    if (adminUsers.length === 0) {
+    if (!adminUsers || adminUsers.length === 0) {
       console.log('Creating default admin user...');
       
       // Hash the password 'admin123'
@@ -157,9 +159,10 @@ async function setupDefaultUsers() {
     }
     
     // Check if customer user exists
-    const customerUsers = await executeQuery('SELECT * FROM users WHERE username = ?', ['customer']);
+    const customerResult = await executeQuery('SELECT * FROM users WHERE username = ?', ['customer']);
+    const customerUsers = customerResult[0];
     
-    if (customerUsers.length === 0) {
+    if (!customerUsers || customerUsers.length === 0) {
       console.log('Creating default customer user...');
       
       // Hash the password 'customer123'
