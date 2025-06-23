@@ -127,6 +127,14 @@ async function setupDefaultUsers() {
   try {
     console.log('Setting up default users...');
     
+    // First, let's check what the actual users table structure looks like
+    try {
+      const tableInfo = await executeQuery('DESCRIBE users');
+      console.log('Users table structure:', tableInfo[0]);
+    } catch (descError) {
+      console.log('Could not describe users table:', descError.message);
+    }
+    
     // Check if admin user exists
     const adminResult = await executeQuery('SELECT * FROM users WHERE username = ?', ['admin']);
     const adminUsers = adminResult[0];
@@ -137,12 +145,32 @@ async function setupDefaultUsers() {
       // Hash the password 'admin123'
       const hashedPassword = await bcrypt.hash('admin123', 10);
       
-      await executeQuery(`
-        INSERT INTO users (username, password, email, role, status) 
-        VALUES (?, ?, ?, ?, ?)
-      `, ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']);
-      
-      console.log('✓ Default admin user created');
+      try {
+        // Try with lowercase 'admin' first
+        await executeQuery(`
+          INSERT INTO users (username, password, email, role, status) 
+          VALUES (?, ?, ?, ?, ?)
+        `, ['admin', hashedPassword, 'admin@ibilling.local', 'admin', 'active']);
+        
+        console.log('✓ Default admin user created with role "admin"');
+      } catch (insertError) {
+        console.log('Failed with role "admin", trying alternative values...');
+        console.log('Insert error:', insertError.message);
+        
+        // If that fails, let's see what enum values are allowed
+        try {
+          const enumQuery = await executeQuery(`
+            SELECT COLUMN_TYPE 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'users' 
+            AND COLUMN_NAME = 'role'
+          `);
+          console.log('Role enum definition:', enumQuery[0]);
+        } catch (enumError) {
+          console.log('Could not get enum definition:', enumError.message);
+        }
+      }
     } else if (!adminUsers[0].password) {
       console.log('Fixing admin user password...');
       
@@ -168,12 +196,16 @@ async function setupDefaultUsers() {
       // Hash the password 'customer123'
       const hashedPassword = await bcrypt.hash('customer123', 10);
       
-      await executeQuery(`
-        INSERT INTO users (username, password, email, role, status) 
-        VALUES (?, ?, ?, ?, ?)
-      `, ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']);
-      
-      console.log('✓ Default customer user created');
+      try {
+        await executeQuery(`
+          INSERT INTO users (username, password, email, role, status) 
+          VALUES (?, ?, ?, ?, ?)
+        `, ['customer', hashedPassword, 'customer@ibilling.local', 'customer', 'active']);
+        
+        console.log('✓ Default customer user created');
+      } catch (insertError) {
+        console.log('Failed to create customer user:', insertError.message);
+      }
     } else if (!customerUsers[0].password) {
       console.log('Fixing customer user password...');
       
