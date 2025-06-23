@@ -1,4 +1,3 @@
-
 const express = require('express');
 const router = express.Router();
 const { executeQuery } = require('../database');
@@ -7,9 +6,9 @@ const { reloadAsteriskConfig } = require('../asterisk-manager');
 // Get all DIDs
 router.get('/', async (req, res) => {
   try {
-    console.log('Fetching all DIDs from database...');
+    console.log('=== DID API: Fetching all DIDs from database ===');
     
-    const dids = await executeQuery(`
+    const result = await executeQuery(`
       SELECT 
         d.id,
         d.number,
@@ -29,7 +28,20 @@ router.get('/', async (req, res) => {
       ORDER BY d.created_at DESC
     `);
 
+    console.log('DID query result structure:', {
+      resultLength: result.length,
+      firstResult: result[0] ? 'exists' : 'null',
+      firstResultLength: result[0] ? result[0].length : 'N/A'
+    });
+
+    // The result from executeQuery returns [rows, fields]
+    const dids = result[0] || [];
+    
     console.log(`Found ${dids.length} DIDs in database`);
+    
+    if (dids.length > 0) {
+      console.log('Sample DID data:', JSON.stringify(dids[0], null, 2));
+    }
     
     const formattedDids = dids.map(did => ({
       id: did.id,
@@ -46,10 +58,19 @@ router.get('/', async (req, res) => {
       updated_at: did.updated_at
     }));
 
+    console.log('Formatted DIDs to send:', formattedDids.length);
+    console.log('=== DID API: Response ready ===');
+
     res.json(formattedDids);
   } catch (error) {
+    console.error('=== DID API ERROR ===');
     console.error('Error fetching DIDs:', error);
-    res.status(500).json({ error: 'Failed to fetch DIDs' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState
+    });
+    res.status(500).json({ error: 'Failed to fetch DIDs', details: error.message });
   }
 });
 

@@ -23,6 +23,7 @@ const DIDs = () => {
   const { toast } = useToast();
   const [dids, setDids] = useState<DID[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingDID, setEditingDID] = useState<DID | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -33,28 +34,48 @@ const DIDs = () => {
 
   const fetchDIDs = async () => {
     try {
-      console.log('Fetching DIDs from database...');
+      console.log('=== FRONTEND: Starting DID fetch ===');
+      setLoading(true);
+      setError(null);
+      
       const data = await apiClient.getDIDs() as any[];
-      console.log('DIDs data received:', data);
+      console.log('=== FRONTEND: DID API response ===');
+      console.log('Response type:', typeof data);
+      console.log('Response length:', Array.isArray(data) ? data.length : 'Not an array');
+      console.log('Raw API response:', data);
+      
+      if (!Array.isArray(data)) {
+        throw new Error(`Expected array but got ${typeof data}`);
+      }
       
       // Transform the data to match our interface
-      const transformedDIDs = data.map((did: any) => ({
-        number: did.number || did.did_number,
-        customer: did.customer_name || did.customer || "Unassigned",
-        country: did.country,
-        rate: did.rate ? `$${did.rate}` : "$0.00",
-        status: did.status,
-        type: did.type || "Local",
-        customerId: did.customer_id,
-        notes: did.notes
-      }));
+      const transformedDIDs = data.map((did: any, index: number) => {
+        console.log(`Transforming DID ${index}:`, did);
+        return {
+          number: did.number || did.did_number || `Unknown-${index}`,
+          customer: did.customer_name || did.customer || "Unassigned",
+          country: did.country || "Unknown",
+          rate: did.rate ? `$${did.rate}` : "$0.00",
+          status: did.status || "Unknown",
+          type: did.type || "Local",
+          customerId: did.customer_id,
+          notes: did.notes || ""
+        };
+      });
+      
+      console.log('=== FRONTEND: Transformed DIDs ===');
+      console.log('Transformed count:', transformedDIDs.length);
+      console.log('Transformed data:', transformedDIDs);
       
       setDids(transformedDIDs);
     } catch (error) {
-      console.error('Error fetching DIDs:', error);
+      console.error('=== FRONTEND: DID fetch error ===');
+      console.error('Error details:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setError(`Failed to load DIDs: ${errorMessage}`);
       toast({
         title: "Error",
-        description: "Failed to load DIDs from database",
+        description: `Failed to load DIDs from database: ${errorMessage}`,
         variant: "destructive",
       });
     } finally {
@@ -194,6 +215,28 @@ const DIDs = () => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">DID Management</h1>
+          <p className="text-red-600">Error loading DIDs</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Error</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-red-600 mb-4">{error}</div>
+            <Button onClick={fetchDIDs} variant="outline">
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const assignedDids = dids.filter(did => did.customerId);
   const availableDids = dids.filter(did => !did.customerId);
 
@@ -203,6 +246,17 @@ const DIDs = () => {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">DID Management</h1>
         <p className="text-gray-600">Manage Direct Inward Dialing numbers and customer assignments</p>
       </div>
+
+      {/* Debug Info */}
+      <Card className="mb-4 bg-blue-50">
+        <CardContent className="p-4">
+          <div className="text-sm">
+            <strong>Debug Info:</strong> Loaded {dids.length} DIDs | 
+            Assigned: {assignedDids.length} | 
+            Available: {availableDids.length}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
